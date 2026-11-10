@@ -165,3 +165,10 @@ cython_debug/
 
 # Test files
 /tests/*output*
+
+# Node / Web App
+node_modules/
+dist/
+.vercel/
+*.local
+
