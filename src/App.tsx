@@ -13,10 +13,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  Laptop,
   Square,
   Zap,
-  HardDrive
+  HardDrive,
+  Image as ImageIcon,
+  Plus,
+  Trash2,
+  RotateCw,
+  ArrowLeft,
+  ArrowRight,
+  Layers,
+  Settings2
 } from 'lucide-react';
 import {
   ScannerOptions,
@@ -24,14 +31,19 @@ import {
   PRESETS,
   QUALITY_PRESETS,
   QualityPreset,
-  BorderStyle,
+  PageFormat,
+  ImageItem,
   applyScannerEffects,
   renderPdfPageToCanvas,
+  renderImageItemToCanvas,
   processFileToScannedPdf,
+  processImagesToPdf,
 } from './lib/scannerEngine';
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState<'pdf' | 'images'>('pdf');
   const [file, setFile] = useState<File | null>(null);
+  const [imageItems, setImageItems] = useState<ImageItem[]>([]);
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -75,28 +87,34 @@ export default function App() {
     }
   };
 
-  // Handle file select
+  // Handle file select (PDF or Images)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      loadFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      handleFilesSelected(Array.from(e.target.files));
     }
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      loadFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesSelected(Array.from(e.dataTransfer.files));
     }
   };
 
-  const loadFile = async (selectedFile: File) => {
-    setFile(selectedFile);
-    setCurrentPage(1);
+  const handleFilesSelected = async (files: File[]) => {
     setSuccessInfo(null);
+    setCurrentPage(1);
 
-    if (selectedFile.type === 'application/pdf' || selectedFile.name.toLowerCase().endsWith('.pdf')) {
+    const firstPdf = files.find((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+    const images = files.filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|heic|heif)$/i.test(f.name));
+
+    if (firstPdf && images.length === 0) {
+      // PDF Mode
+      setActiveTab('pdf');
+      setFile(firstPdf);
+      setImageItems([]);
       try {
-        const buffer = await selectedFile.arrayBuffer();
+        const buffer = await firstPdf.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
         const doc = await loadingTask.promise;
         setPdfDoc(doc);
@@ -104,51 +122,121 @@ export default function App() {
       } catch (err) {
         console.error('Error al cargar PDF:', err);
       }
-    } else {
+    } else if (images.length > 0) {
+      // Images Mode
+      setActiveTab('images');
+      setFile(null);
       setPdfDoc(null);
-      setTotalPages(1);
+
+      const newItems: ImageItem[] = images.map((img, idx) => ({
+        id: `img_${Date.now()}_${idx}_${Math.random()}`,
+        file: img,
+        previewUrl: URL.createObjectURL(img),
+        rotation: 0,
+        name: img.name,
+        size: img.size,
+      }));
+
+      setImageItems((prev) => [...prev, ...newItems]);
+      setTotalPages((prev) => (imageItems.length === 0 ? newItems.length : prev + newItems.length));
     }
   };
 
-  // Render preview canvas whenever options, file, or page changes
+  // Add more images
+  const handleAddMoreImages = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const moreImages = Array.from(e.target.files).filter(
+        (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|heic|heif)$/i.test(f.name)
+      );
+      const newItems: ImageItem[] = moreImages.map((img, idx) => ({
+        id: `img_${Date.now()}_${idx}_${Math.random()}`,
+        file: img,
+        previewUrl: URL.createObjectURL(img),
+        rotation: 0,
+        name: img.name,
+        size: img.size,
+      }));
+      setImageItems((prev) => [...prev, ...newItems]);
+    }
+  };
+
+  // Image actions: Rotate 90deg, Delete, Move
+  const handleRotateImage = (index: number) => {
+    setImageItems((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, rotation: (item.rotation + 90) % 360 } : item))
+    );
+  };
+
+  const handleDeleteImage = (index: number) => {
+    setImageItems((prev) => {
+      const itemToDelete = prev[index];
+      if (itemToDelete) URL.revokeObjectURL(itemToDelete.previewUrl);
+      const next = prev.filter((_, idx) => idx !== index);
+      if (currentPage > next.length && next.length > 0) {
+        setCurrentPage(next.length);
+      }
+      return next;
+    });
+  };
+
+  const handleMoveImage = (index: number, direction: 'left' | 'right') => {
+    setImageItems((prev) => {
+      const targetIndex = direction === 'left' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const copy = [...prev];
+      const temp = copy[index];
+      copy[index] = copy[targetIndex];
+      copy[targetIndex] = temp;
+      return copy;
+    });
+  };
+
+  // Keep totalPages updated in images mode
+  useEffect(() => {
+    if (activeTab === 'images') {
+      setTotalPages(Math.max(1, imageItems.length));
+    }
+  }, [imageItems, activeTab]);
+
+  // Render preview canvas whenever options, file/images, or page changes
   useEffect(() => {
     let isCancelled = false;
 
     async function updatePreview() {
-      if (!file) return;
+      let srcCanvas: HTMLCanvasElement | null = null;
 
-      let srcCanvas: HTMLCanvasElement;
-
-      if (pdfDoc) {
+      if (activeTab === 'pdf' && pdfDoc) {
         try {
           const { canvas } = await renderPdfPageToCanvas(pdfDoc, currentPage, options.resolutionScale);
           if (isCancelled) return;
           srcCanvas = canvas;
         } catch (err) {
-          console.error('Error rendering preview page:', err);
+          console.error('Error rendering preview PDF page:', err);
           return;
         }
-      } else {
-        // Image preview
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-        await new Promise((res) => {
-          img.onload = res;
-          img.src = url;
-        });
-        if (isCancelled) return;
-        srcCanvas = document.createElement('canvas');
-        srcCanvas.width = img.naturalWidth;
-        srcCanvas.height = img.naturalHeight;
-        const ctx = srcCanvas.getContext('2d');
-        if (ctx) ctx.drawImage(img, 0, 0);
-        URL.revokeObjectURL(url);
+      } else if (activeTab === 'images' && imageItems.length > 0) {
+        const item = imageItems[currentPage - 1] || imageItems[0];
+        if (item) {
+          try {
+            srcCanvas = await renderImageItemToCanvas(item, 1200);
+            if (isCancelled) return;
+          } catch (err) {
+            console.error('Error rendering preview image:', err);
+            return;
+          }
+        }
       }
+
+      if (!srcCanvas) return;
 
       originalCanvasRef.current = srcCanvas;
 
-      // Apply effects with deterministic seed for stable preview
-      const processedCanvas = applyScannerEffects(srcCanvas, options, 42);
+      let processedCanvas: HTMLCanvasElement;
+      if (activeTab === 'images' && !options.applyEffectsToImages) {
+        processedCanvas = srcCanvas;
+      } else {
+        processedCanvas = applyScannerEffects(srcCanvas, options, 42);
+      }
       if (isCancelled) return;
 
       const displayCanvas = previewCanvasRef.current;
@@ -175,24 +263,37 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, [file, pdfDoc, currentPage, options, previewMode]);
+  }, [file, pdfDoc, imageItems, currentPage, options, previewMode, activeTab]);
 
   // Execute full scan and download
   const handleProcessAndDownload = async () => {
-    if (!file) return;
     setIsProcessing(true);
     setSuccessInfo(null);
 
     try {
-      const result = await processFileToScannedPdf(file, options, (current, total, msg) => {
-        setProgress({ current, total, msg });
-      });
+      let result;
+      let downloadName = 'documento_scanned.pdf';
+
+      if (activeTab === 'pdf' && file) {
+        result = await processFileToScannedPdf(file, options, (current, total, msg) => {
+          setProgress({ current, total, msg });
+        });
+        const baseName = file.name.replace(/\.[^/.]+$/, '');
+        downloadName = `${baseName}_scanned.pdf`;
+      } else if (activeTab === 'images' && imageItems.length > 0) {
+        result = await processImagesToPdf(imageItems, options, (current, total, msg) => {
+          setProgress({ current, total, msg });
+        });
+        const firstImgName = imageItems[0].name.replace(/\.[^/.]+$/, '');
+        downloadName = imageItems.length === 1 ? `${firstImgName}.pdf` : `Fotos_Convertidas_${imageItems.length}_pags.pdf`;
+      } else {
+        return;
+      }
 
       const url = URL.createObjectURL(result.blob);
       const a = document.createElement('a');
-      const baseName = file.name.replace(/\.[^/.]+$/, '');
       a.href = url;
-      a.download = `${baseName}_scanned.pdf`;
+      a.download = downloadName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -218,6 +319,8 @@ export default function App() {
     }
   };
 
+  const hasContent = (activeTab === 'pdf' && file) || (activeTab === 'images' && imageItems.length > 0);
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col selection:bg-indigo-500 selection:text-white">
       {/* Top Navbar */}
@@ -230,18 +333,18 @@ export default function App() {
             <div>
               <div className="flex items-center space-x-2">
                 <span className="font-bold text-slate-900 text-lg tracking-tight">Look Like Scanned</span>
-                <span className="bg-emerald-50 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-semibold border border-emerald-100">
-                  Optimizador v2.0
+                <span className="bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-semibold border border-indigo-100">
+                  PDF & Fotos
                 </span>
               </div>
-              <p className="text-xs text-slate-500">Con bordes realistas de hoja y control estricto de peso</p>
+              <p className="text-xs text-slate-500">Convierte PDFs e Imágenes (Fotos/Capturas) en documentos escaneados</p>
             </div>
           </div>
 
           <div className="flex items-center space-x-3">
             <div className="hidden sm:flex items-center text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
               <ShieldCheck className="w-4 h-4 mr-1.5 text-emerald-600" />
-              100% En tu navegador (Sin subir a la nube)
+              100% En tu navegador (Sin subir a internet)
             </div>
 
             <button
@@ -257,72 +360,93 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Banner de Optimización y Bordes */}
-        <div className="mb-6 bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 border border-emerald-200 rounded-2xl p-4 flex items-start sm:items-center justify-between gap-4 shadow-xs">
-          <div className="flex items-start sm:items-center space-x-3">
-            <div className="p-2 bg-emerald-600 text-white rounded-xl mt-0.5 sm:mt-0 shrink-0">
-              <Zap className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-emerald-950">
-                Mejoras aplicadas: Bordes reales de inclinación y compresión de peso inteligente
-              </h2>
-              <p className="text-xs text-emerald-800 mt-0.5">
-                Ahora al inclinar la hoja se dibuja el <strong>contorno y sombra física de la hoja</strong> (o el cristal de fotocopiadora), y la compresión JPEG optimizada <strong>evita que el archivo pase de 400 KB a 1.4 MB</strong>.
-              </p>
-            </div>
+        {/* Navigation Tabs: PDF vs Fotos/Imágenes */}
+        <div className="flex items-center justify-between mb-6 pb-2 border-b border-slate-200/80">
+          <div className="flex items-center space-x-2 bg-slate-200/70 p-1.5 rounded-2xl">
+            <button
+              onClick={() => setActiveTab('pdf')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'pdf'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              <span>Escanear Documento PDF</span>
+              {file && <span className="w-2 h-2 rounded-full bg-emerald-500 ml-1"></span>}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('images')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'images'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ImageIcon className="w-4 h-4" />
+              <span>Fotos y Capturas a PDF</span>
+              {imageItems.length > 0 && (
+                <span className="bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.2 rounded-full ml-1">
+                  {imageItems.length}
+                </span>
+              )}
+            </button>
           </div>
-          <button
-            onClick={() => setIsVercelModalOpen(true)}
-            className="shrink-0 text-xs font-bold text-emerald-800 hover:text-emerald-950 bg-white border border-emerald-200 px-3 py-1.5 rounded-lg shadow-2xs hover:shadow-xs transition"
-          >
-            Acceso Web &rarr;
-          </button>
+
+          <span className="hidden sm:inline-text text-xs text-slate-500">
+            {activeTab === 'pdf' ? 'Convierte y rota PDFs existentes' : 'Empaqueta 1 o varias fotos en un solo PDF'}
+          </span>
         </div>
 
-        {!file ? (
+        {!hasContent ? (
           /* Empty / Upload State */
-          <div className="max-w-3xl mx-auto mt-6">
+          <div className="max-w-3xl mx-auto mt-4">
             <div
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
               className="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-3xl p-12 text-center bg-white shadow-sm hover:shadow-md transition-all cursor-pointer group"
-              onClick={() => document.getElementById('file-input')?.click()}
+              onClick={() => document.getElementById('main-file-input')?.click()}
             >
               <input
-                id="file-input"
+                id="main-file-input"
                 type="file"
-                accept=".pdf,image/png,image/jpeg,image/webp"
+                multiple
+                accept=".pdf,image/png,image/jpeg,image/webp,image/bmp"
                 className="hidden"
                 onChange={handleFileChange}
               />
               <div className="w-20 h-20 mx-auto rounded-3xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-5 group-hover:scale-105 group-hover:bg-indigo-100 transition-all">
-                <Upload className="w-10 h-10" />
+                {activeTab === 'pdf' ? <Upload className="w-10 h-10" /> : <ImageIcon className="w-10 h-10" />}
               </div>
               <h3 className="text-xl font-bold text-slate-800 mb-2">
-                Arrastra tu PDF o imagen aquí
+                {activeTab === 'pdf'
+                  ? 'Arrastra tu PDF aquí'
+                  : 'Arrastra tus fotos, capturas o imágenes aquí'}
               </h3>
               <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
-                Soporta archivos <strong>PDF multipágina</strong> e imágenes. Ahora con <strong>bordes visibles de escáner</strong> y <strong>tamaño de salida optimizado</strong>.
+                {activeTab === 'pdf'
+                  ? 'Añade inclinación, bordes reales de hoja y optimización de peso.'
+                  : 'Puedes seleccionar una o múltiples imágenes (JPG, PNG, WebP) para unirlas en un solo PDF.'}
               </p>
               <button
                 type="button"
                 className="inline-flex items-center px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-md shadow-indigo-100 transition"
               >
-                <Upload className="w-4 h-4 mr-2" />
-                Seleccionar archivo desde tu equipo
+                <Plus className="w-4 h-4 mr-2" />
+                {activeTab === 'pdf' ? 'Seleccionar archivo PDF' : 'Seleccionar Fotos o Imágenes (1 o varias)'}
               </button>
             </div>
 
             {/* Feature Highlights */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-12">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-10">
               <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
                 <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
-                  <Square className="w-5 h-5" />
+                  <ImageIcon className="w-5 h-5" />
                 </div>
-                <h4 className="font-bold text-slate-900 text-sm mb-1">Bordes Reales al Inclinar</h4>
+                <h4 className="font-bold text-slate-900 text-sm mb-1">Fotos a PDF Unificado</h4>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Delimita el perímetro de la hoja con sombra natural de papel o esquinas oscuras de cama plana de escáner.
+                  Toma fotos de contratos o recibos con tu celular y conviértelos en un PDF ordenado con tamaño estándar A4.
                 </p>
               </div>
 
@@ -330,55 +454,185 @@ export default function App() {
                 <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4">
                   <HardDrive className="w-5 h-5" />
                 </div>
-                <h4 className="font-bold text-slate-900 text-sm mb-1">Control Estricto de Peso</h4>
+                <h4 className="font-bold text-slate-900 text-sm mb-1">Control de Peso</h4>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Grano suave y compresión DCT optimizada para que tus PDFs queden livianos (~100-250 KB) y no se inflen a 1.4 MB.
+                  Evita archivos gigantes. Reduce fotos de 5 MB a PDFs ligeros de ~150-250 KB por página.
                 </p>
               </div>
 
               <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
                 <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
-                  <Globe className="w-5 h-5" />
+                  <Square className="w-5 h-5" />
                 </div>
-                <h4 className="font-bold text-slate-900 text-sm mb-1">Fácil de usar en la empresa</h4>
+                <h4 className="font-bold text-slate-900 text-sm mb-1">Bordes Realistas</h4>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Listo para desplegar en Vercel gratis. Úsalo desde tu laptop del trabajo sin instalar nada.
+                  Al inclinar se proyecta la sombra natural de la hoja y el contorno físico del papel escaneado.
                 </p>
               </div>
             </div>
           </div>
         ) : (
-          /* File Loaded: Workspace with Controls & Live Preview */
+          /* Workspace with Controls & Live Preview */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             {/* Left Column: Controls & Presets (5 cols) */}
             <div className="lg:col-span-5 space-y-5">
-              {/* File details card */}
-              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex items-center justify-between">
-                <div className="flex items-center space-x-3 truncate">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                    <FileText className="w-5 h-5" />
+              {/* Active File / Images Strip */}
+              {activeTab === 'pdf' && file && (
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex items-center justify-between">
+                  <div className="flex items-center space-x-3 truncate">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div className="truncate">
+                      <h4 className="text-sm font-bold text-slate-900 truncate" title={file.name}>
+                        {file.name}
+                      </h4>
+                      <p className="text-xs text-slate-500">
+                        {(file.size / 1024).toFixed(0)} KB • {totalPages} {totalPages === 1 ? 'página' : 'páginas'}
+                      </p>
+                    </div>
                   </div>
-                  <div className="truncate">
-                    <h4 className="text-sm font-bold text-slate-900 truncate" title={file.name}>
-                      {file.name}
-                    </h4>
-                    <p className="text-xs text-slate-500">
-                      {(file.size / 1024).toFixed(0)} KB • {totalPages} {totalPages === 1 ? 'página' : 'páginas'}
-                    </p>
+                  <button
+                    onClick={() => {
+                      setFile(null);
+                      setPdfDoc(null);
+                    }}
+                    className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg font-medium transition"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+              )}
+
+              {activeTab === 'images' && (
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <ImageIcon className="w-4 h-4 text-indigo-600" />
+                      <span className="text-xs font-bold text-slate-900">
+                        Fotos seleccionadas ({imageItems.length} {imageItems.length === 1 ? 'página' : 'páginas'})
+                      </span>
+                    </div>
+
+                    <label className="cursor-pointer text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition inline-flex items-center">
+                      <Plus className="w-3.5 h-3.5 mr-1" />
+                      Añadir más fotos
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleAddMoreImages}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Thumbnail gallery of images */}
+                  <div className="flex space-x-2 overflow-x-auto pb-2 pt-1 scrollbar-thin">
+                    {imageItems.map((item, idx) => (
+                      <div
+                        key={item.id}
+                        onClick={() => setCurrentPage(idx + 1)}
+                        className={`shrink-0 w-24 p-1.5 rounded-xl border transition-all cursor-pointer relative group ${
+                          currentPage === idx + 1
+                            ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/20'
+                            : 'border-slate-200 hover:border-slate-300 bg-slate-50'
+                        }`}
+                      >
+                        <div className="w-full h-24 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200/60 relative">
+                          <img
+                            src={item.previewUrl}
+                            alt={item.name}
+                            style={{ transform: `rotate(${item.rotation}deg)` }}
+                            className="max-h-full max-w-full object-contain transition-transform"
+                          />
+                          <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[9px] px-1 rounded font-bold">
+                            #{idx + 1}
+                          </span>
+                        </div>
+
+                        {/* Quick action icons for this image */}
+                        <div className="flex items-center justify-between mt-1 px-0.5 text-slate-500">
+                          <button
+                            title="Girar 90°"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRotateImage(idx);
+                            }}
+                            className="p-1 hover:text-indigo-600 hover:bg-slate-200 rounded"
+                          >
+                            <RotateCw className="w-3 h-3" />
+                          </button>
+                          <div className="flex space-x-0.5">
+                            {idx > 0 && (
+                              <button
+                                title="Mover a la izquierda"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMoveImage(idx, 'left');
+                                }}
+                                className="p-0.5 hover:text-indigo-600"
+                              >
+                                <ArrowLeft className="w-3 h-3" />
+                              </button>
+                            )}
+                            {idx < imageItems.length - 1 && (
+                              <button
+                                title="Mover a la derecha"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMoveImage(idx, 'right');
+                                }}
+                                className="p-0.5 hover:text-indigo-600"
+                              >
+                                <ArrowRight className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            title="Eliminar"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteImage(idx);
+                            }}
+                            className="p-1 hover:text-rose-600 hover:bg-rose-50 rounded"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Options specific to Image-to-PDF */}
+                  <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-slate-600 font-medium">Formato de hoja:</span>
+                      <select
+                        value={options.pageFormat}
+                        onChange={(e) => setOptions({ ...options, pageFormat: e.target.value as PageFormat })}
+                        className="bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-800"
+                      >
+                        <option value="a4">A4 (Estándar de oficina)</option>
+                        <option value="letter">Carta (Letter)</option>
+                        <option value="fit">Ajustar al tamaño de la foto</option>
+                      </select>
+                    </div>
+
+                    <label className="flex items-center space-x-1.5 cursor-pointer font-medium text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={options.applyEffectsToImages}
+                        onChange={(e) => setOptions({ ...options, applyEffectsToImages: e.target.checked })}
+                        className="rounded text-indigo-600"
+                      />
+                      <span>Aplicar efecto escáner a fotos</span>
+                    </label>
                   </div>
                 </div>
-                <button
-                  onClick={() => {
-                    setFile(null);
-                    setPdfDoc(null);
-                  }}
-                  className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg font-medium transition"
-                >
-                  Cambiar
-                </button>
-              </div>
+              )}
 
-              {/* SECTION: PESO Y TAMAÑO DE ARCHIVO (PRIORITARIO) */}
+              {/* SECTION: PESO Y TAMAÑO DE ARCHIVO */}
               <div className="bg-white rounded-2xl p-5 border border-indigo-200/80 shadow-xs space-y-3 bg-gradient-to-b from-indigo-50/30 to-white">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-slate-900 flex items-center">
@@ -437,117 +691,119 @@ export default function App() {
                     className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
                   />
                   <p className="text-[11px] text-slate-500">
-                    60-70% ofrece la textura clásica de escáner y mantiene el archivo entre 120-250 KB.
+                    60-70% mantiene el archivo entre 120-250 KB por página.
                   </p>
                 </div>
               </div>
 
-              {/* SECTION: BORDES AL INCLINAR */}
-              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center justify-between">
-                  <span className="flex items-center">
-                    <Square className="w-4 h-4 mr-2 text-slate-700" />
-                    Bordes y Contorno de Inclinación
-                  </span>
-                </h3>
+              {/* SECTION: BORDES AL INCLINAR (Only if effects enabled) */}
+              {(activeTab === 'pdf' || options.applyEffectsToImages) && (
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center justify-between">
+                    <span className="flex items-center">
+                      <Square className="w-4 h-4 mr-2 text-slate-700" />
+                      Bordes y Contorno de Inclinación
+                    </span>
+                  </h3>
 
-                {/* Border Style Selector */}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <button
-                    onClick={() => setOptions({ ...options, borderStyle: 'paper_shadow', scannerBedColor: 'light_gray' })}
-                    className={`p-2.5 rounded-xl border text-left transition ${
-                      options.borderStyle === 'paper_shadow'
-                        ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    <div>📄 Hoja + Sombra</div>
-                    <div className="text-[10px] text-slate-500 font-normal mt-0.5">Contorno y sombra física</div>
-                  </button>
+                  {/* Border Style Selector */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      onClick={() => setOptions({ ...options, borderStyle: 'paper_shadow', scannerBedColor: 'light_gray' })}
+                      className={`p-2.5 rounded-xl border text-left transition ${
+                        options.borderStyle === 'paper_shadow'
+                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div>📄 Hoja + Sombra</div>
+                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">Contorno y sombra física</div>
+                    </button>
 
-                  <button
-                    onClick={() => setOptions({ ...options, borderStyle: 'scanner_bed', scannerBedColor: 'dark_photocopy' })}
-                    className={`p-2.5 rounded-xl border text-left transition ${
-                      options.borderStyle === 'scanner_bed'
-                        ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    <div>🖨️ Esquinas de Escáner</div>
-                    <div className="text-[10px] text-slate-500 font-normal mt-0.5">Cristal oscuro en esquinas</div>
-                  </button>
+                    <button
+                      onClick={() => setOptions({ ...options, borderStyle: 'scanner_bed', scannerBedColor: 'dark_photocopy' })}
+                      className={`p-2.5 rounded-xl border text-left transition ${
+                        options.borderStyle === 'scanner_bed'
+                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div>🖨️ Esquinas de Escáner</div>
+                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">Cristal oscuro en esquinas</div>
+                    </button>
 
-                  <button
-                    onClick={() => setOptions({ ...options, borderStyle: 'thin_line', scannerBedColor: 'white' })}
-                    className={`p-2.5 rounded-xl border text-left transition ${
-                      options.borderStyle === 'thin_line'
-                        ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    <div>⚪ Borde Fino</div>
-                    <div className="text-[10px] text-slate-500 font-normal mt-0.5">Línea delgada perimetral</div>
-                  </button>
+                    <button
+                      onClick={() => setOptions({ ...options, borderStyle: 'thin_line', scannerBedColor: 'white' })}
+                      className={`p-2.5 rounded-xl border text-left transition ${
+                        options.borderStyle === 'thin_line'
+                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div>⚪ Borde Fino</div>
+                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">Línea delgada perimetral</div>
+                    </button>
 
-                  <button
-                    onClick={() => setOptions({ ...options, borderStyle: 'none' })}
-                    className={`p-2.5 rounded-xl border text-left transition ${
-                      options.borderStyle === 'none'
-                        ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    <div>🚫 Sin Bordes</div>
-                    <div className="text-[10px] text-slate-500 font-normal mt-0.5">Fondo blanco uniforme</div>
-                  </button>
-                </div>
-
-                {/* Border Intensity Slider */}
-                {options.borderStyle !== 'none' && (
-                  <div className="space-y-1 pt-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="font-medium text-slate-700">Intensidad / Visibilidad de Bordes</span>
-                      <span className="text-slate-500">{options.borderIntensity}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="20"
-                      max="100"
-                      step="5"
-                      value={options.borderIntensity}
-                      onChange={(e) => setOptions({ ...options, borderIntensity: parseInt(e.target.value) })}
-                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                    />
+                    <button
+                      onClick={() => setOptions({ ...options, borderStyle: 'none' })}
+                      className={`p-2.5 rounded-xl border text-left transition ${
+                        options.borderStyle === 'none'
+                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div>🚫 Sin Bordes</div>
+                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">Fondo blanco uniforme</div>
+                    </button>
                   </div>
-                )}
 
-                {/* Inclinación (Askew) */}
-                <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between text-xs">
-                    <label className="font-medium text-slate-700 flex items-center cursor-pointer">
+                  {/* Border Intensity Slider */}
+                  {options.borderStyle !== 'none' && (
+                    <div className="space-y-1 pt-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="font-medium text-slate-700">Intensidad / Visibilidad de Bordes</span>
+                        <span className="text-slate-500">{options.borderIntensity}%</span>
+                      </div>
                       <input
-                        type="checkbox"
-                        checked={options.askew}
-                        onChange={(e) => setOptions({ ...options, askew: e.target.checked })}
-                        className="rounded text-indigo-600 mr-2"
+                        type="range"
+                        min="20"
+                        max="100"
+                        step="5"
+                        value={options.borderIntensity}
+                        onChange={(e) => setOptions({ ...options, borderIntensity: parseInt(e.target.value) })}
+                        className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
                       />
-                      Inclinación aleatoria (Askew)
-                    </label>
-                    <span className="text-slate-500">±{options.askewAngle}°</span>
-                  </div>
-                  {options.askew && (
-                    <input
-                      type="range"
-                      min="0.2"
-                      max="2.5"
-                      step="0.1"
-                      value={options.askewAngle}
-                      onChange={(e) => setOptions({ ...options, askewAngle: parseFloat(e.target.value) })}
-                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                    />
+                    </div>
                   )}
+
+                  {/* Inclinación (Askew) */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                    <div className="flex items-center justify-between text-xs">
+                      <label className="font-medium text-slate-700 flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={options.askew}
+                          onChange={(e) => setOptions({ ...options, askew: e.target.checked })}
+                          className="rounded text-indigo-600 mr-2"
+                        />
+                        Inclinación aleatoria (Askew)
+                      </label>
+                      <span className="text-slate-500">±{options.askewAngle}°</span>
+                    </div>
+                    {options.askew && (
+                      <input
+                        type="range"
+                        min="0.2"
+                        max="2.5"
+                        step="0.1"
+                        value={options.askewAngle}
+                        onChange={(e) => setOptions({ ...options, askewAngle: parseFloat(e.target.value) })}
+                        className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Presets Rápidos */}
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs">
@@ -573,100 +829,6 @@ export default function App() {
                       </div>
                     </button>
                   ))}
-                </div>
-              </div>
-
-              {/* Ajustes Avanzados */}
-              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-3">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center justify-between">
-                  <span className="flex items-center">
-                    <Sliders className="w-4 h-4 mr-2 text-slate-700" />
-                    Efectos Ópticos
-                  </span>
-                  <button
-                    onClick={() => handleSelectPreset('office')}
-                    className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center"
-                  >
-                    <RefreshCw className="w-3 h-3 mr-1" />
-                    Restablecer
-                  </button>
-                </h3>
-
-                {/* Photocopy Black and White */}
-                <div className="pt-2 border-t border-slate-100">
-                  <label className="flex items-center justify-between text-xs font-medium text-slate-700 cursor-pointer">
-                    <span className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={options.blackAndWhite}
-                        onChange={(e) => setOptions({ ...options, blackAndWhite: e.target.checked })}
-                        className="rounded text-indigo-600 mr-2"
-                      />
-                      Modo Fotocopia Blanco y Negro
-                    </span>
-                    <span className="text-[11px] text-slate-400">Tóner contrastado</span>
-                  </label>
-                </div>
-
-                {/* Noise (Grano Suave Optimizado) */}
-                <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-slate-700">Grano de Papel (Optimizado)</span>
-                    <span className="text-slate-500">{options.noise}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="25"
-                    step="1"
-                    value={options.noise}
-                    onChange={(e) => setOptions({ ...options, noise: parseInt(e.target.value) })}
-                    className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                  />
-                </div>
-
-                {/* Blur */}
-                <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between text-xs">
-                    <label className="font-medium text-slate-700 flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={options.blur}
-                        onChange={(e) => setOptions({ ...options, blur: e.target.checked })}
-                        className="rounded text-indigo-600 mr-2"
-                      />
-                      Desenfoque de lente
-                    </label>
-                    <span className="text-slate-500">{options.blurRadius}px</span>
-                  </div>
-                  {options.blur && (
-                    <input
-                      type="range"
-                      min="0.3"
-                      max="2.0"
-                      step="0.1"
-                      value={options.blurRadius}
-                      onChange={(e) => setOptions({ ...options, blurRadius: parseFloat(e.target.value) })}
-                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                    />
-                  )}
-                </div>
-
-                {/* Contraste */}
-                <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-slate-700">Contraste</span>
-                    <span className="text-slate-500">{options.contrast.toFixed(2)}x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.8"
-                    max="1.5"
-                    step="0.05"
-                    value={options.contrast}
-                    onChange={(e) => setOptions({ ...options, contrast: parseFloat(e.target.value) })}
-                    className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                  />
                 </div>
               </div>
 
@@ -697,7 +859,10 @@ export default function App() {
                     className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md shadow-indigo-100 flex items-center justify-center space-x-2 transition cursor-pointer"
                   >
                     <Download className="w-5 h-5" />
-                    <span>Descargar PDF Escaneado ({totalPages} {totalPages === 1 ? 'pág' : 'págs'})</span>
+                    <span>
+                      Descargar PDF {activeTab === 'images' ? 'desde Fotos' : 'Escaneado'} ({totalPages}{' '}
+                      {totalPages === 1 ? 'pág' : 'págs'})
+                    </span>
                   </button>
                 )}
 
@@ -720,7 +885,9 @@ export default function App() {
               <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
                 <div className="flex items-center space-x-2">
                   <Eye className="w-4 h-4 text-indigo-600" />
-                  <span className="font-bold text-slate-900 text-sm">Vista Previa con Bordes de Escaneo</span>
+                  <span className="font-bold text-slate-900 text-sm">
+                    Vista Previa {activeTab === 'images' ? `(Foto #${currentPage})` : `(Página #${currentPage})`}
+                  </span>
                 </div>
 
                 {/* Original vs Scanned Toggle */}
@@ -733,7 +900,7 @@ export default function App() {
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    Escaneado con Bordes
+                    Resultado
                   </button>
                   <button
                     onClick={() => setPreviewMode('original')}
