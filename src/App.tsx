@@ -327,12 +327,12 @@ export default function App() {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-indigo-100">
-              <FileText className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-black text-sm tracking-tighter shadow-md shadow-indigo-100">
+              AG
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <span className="font-bold text-slate-900 text-lg tracking-tight">Look Like Scanned</span>
+                <span className="font-bold text-slate-900 text-lg tracking-tight">AG Scan PDF</span>
                 <span className="bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-semibold border border-indigo-100">
                   PDF & Fotos
                 </span>
@@ -995,7 +995,7 @@ export default function App() {
                   vercel
                 </code>
                 <p className="text-[11px] text-slate-500">
-                  Sigue las 3 preguntas en pantalla (Enter, Enter) y tendrás tu URL pública (ejemplo: <code>https://look-like-scanned.vercel.app</code>) en 30 segundos.
+                  Sigue las 3 preguntas en pantalla (Enter, Enter) y tendrás tu URL pública (ejemplo: <code>https://ag-scan-pdf.vercel.app</code>) en 30 segundos.
                 </p>
               </div>
 
