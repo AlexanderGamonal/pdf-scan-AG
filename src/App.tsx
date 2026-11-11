@@ -6,7 +6,6 @@ import {
   Download,
   Sliders,
   ShieldCheck,
-  Globe,
   RefreshCw,
   Eye,
   CheckCircle2,
@@ -59,7 +58,6 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [progressMsg, setProgressMsg] = useState<string>('');
   const [previewMode, setPreviewMode] = useState<'scanned' | 'original'>('scanned');
-  const [isVercelModalOpen, setIsVercelModalOpen] = useState<boolean>(false);
   const [successInfo, setSuccessInfo] = useState<{ originalSize: string; newSize: string; reduction: string } | null>(null);
 
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -425,18 +423,10 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-3">
-            <div className="hidden sm:flex items-center text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
+            <div className="flex items-center text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5 shadow-2xs">
               <ShieldCheck className="w-4 h-4 mr-1.5 text-emerald-600" />
               100% En tu navegador (Sin subir a internet)
             </div>
-
-            <button
-              onClick={() => setIsVercelModalOpen(true)}
-              className="inline-flex items-center text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg px-3 py-2 transition"
-            >
-              <Globe className="w-4 h-4 mr-1.5 text-slate-600" />
-              Subir a Vercel
-            </button>
           </div>
         </div>
       </header>
@@ -1508,82 +1498,6 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* Modal: Cómo desplegar en Vercel */}
-      {isVercelModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl space-y-6 relative border border-slate-200">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-2xl bg-black text-white flex items-center justify-center font-bold">
-                  ▲
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">
-                    Desplegar en Vercel Gratis
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Accede a tu escáner desde cualquier laptop corporativa o celular
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsVercelModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-lg font-bold p-1"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-4 text-xs text-slate-600">
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                <div className="font-bold text-slate-900 flex items-center text-sm">
-                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs mr-2">
-                    1
-                  </span>
-                  Opción Rápida: Desde tu terminal con Vercel CLI
-                </div>
-                <p className="text-slate-600">
-                  Abre PowerShell en esta carpeta y ejecuta:
-                </p>
-                <code className="block bg-slate-900 text-slate-100 p-2.5 rounded-xl font-mono text-xs">
-                  vercel
-                </code>
-                <p className="text-[11px] text-slate-500">
-                  Presiona Enter a cada pregunta y tendrás tu URL pública en 30 segundos.
-                </p>
-              </div>
-
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                <div className="font-bold text-slate-900 flex items-center text-sm">
-                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs mr-2">
-                    2
-                  </span>
-                  Opción GitHub: Despliegue automático
-                </div>
-                <p className="text-slate-600">
-                  Tu proyecto ya está sincronizado en tu cuenta de GitHub:
-                </p>
-                <p className="font-mono text-indigo-700 bg-indigo-50 p-2 rounded-lg text-[11px]">
-                  https://github.com/AlexanderGamonal/pdf-scan-AG
-                </p>
-                <p className="text-slate-600">
-                  Solo entra a <a href="https://vercel.com/new" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-semibold">vercel.com/new</a> y haz clic en <strong>Deploy</strong>.
-                </p>
-              </div>
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                onClick={() => setIsVercelModalOpen(false)}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition"
-              >
-                Entendido
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
