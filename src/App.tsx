@@ -22,8 +22,9 @@ import {
   RotateCw,
   ArrowLeft,
   ArrowRight,
-  Layers,
-  Settings2
+  Contact,
+  ArrowUpDown,
+  CreditCard
 } from 'lucide-react';
 import {
   ScannerOptions,
@@ -33,15 +34,19 @@ import {
   QualityPreset,
   PageFormat,
   ImageItem,
+  DniOptions,
+  DEFAULT_DNI_OPTIONS,
   applyScannerEffects,
   renderPdfPageToCanvas,
   renderImageItemToCanvas,
+  renderDniToA4Canvas,
   processFileToScannedPdf,
   processImagesToPdf,
+  processDniToPdf,
 } from './lib/scannerEngine';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'pdf' | 'images'>('pdf');
+  const [activeTab, setActiveTab] = useState<'pdf' | 'images' | 'dni'>('dni');
   const [file, setFile] = useState<File | null>(null);
   const [imageItems, setImageItems] = useState<ImageItem[]>([]);
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
@@ -49,18 +54,15 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [selectedPreset, setSelectedPreset] = useState<string>('office');
   const [options, setOptions] = useState<ScannerOptions>(DEFAULT_OPTIONS);
+  const [dniOptions, setDniOptions] = useState<DniOptions>(DEFAULT_DNI_OPTIONS);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [progress, setProgress] = useState<{ current: number; total: number; msg: string }>({
-    current: 0,
-    total: 0,
-    msg: '',
-  });
+  const [progressMsg, setProgressMsg] = useState<string>('');
   const [previewMode, setPreviewMode] = useState<'scanned' | 'original'>('scanned');
   const [isVercelModalOpen, setIsVercelModalOpen] = useState<boolean>(false);
   const [successInfo, setSuccessInfo] = useState<{ originalSize: string; newSize: string; reduction: string } | null>(null);
 
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const originalCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const dniCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Apply preset
   const handleSelectPreset = (key: string) => {
@@ -87,7 +89,7 @@ export default function App() {
     }
   };
 
-  // Handle file select (PDF or Images)
+  // Handle standard file select (PDF or Images)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       handleFilesSelected(Array.from(e.target.files));
@@ -109,7 +111,6 @@ export default function App() {
     const images = files.filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|heic|heif)$/i.test(f.name));
 
     if (firstPdf && images.length === 0) {
-      // PDF Mode
       setActiveTab('pdf');
       setFile(firstPdf);
       setImageItems([]);
@@ -123,26 +124,85 @@ export default function App() {
         console.error('Error al cargar PDF:', err);
       }
     } else if (images.length > 0) {
-      // Images Mode
-      setActiveTab('images');
-      setFile(null);
-      setPdfDoc(null);
+      if (activeTab === 'dni') {
+        // If in DNI mode and 2 images dropped, assign 1st to front and 2nd to back!
+        if (images.length >= 2) {
+          setDniOptions((prev) => ({
+            ...prev,
+            frontImage: images[0],
+            frontPreviewUrl: URL.createObjectURL(images[0]),
+            backImage: images[1],
+            backPreviewUrl: URL.createObjectURL(images[1]),
+          }));
+        } else if (!dniOptions.frontImage) {
+          setDniOptions((prev) => ({
+            ...prev,
+            frontImage: images[0],
+            frontPreviewUrl: URL.createObjectURL(images[0]),
+          }));
+        } else {
+          setDniOptions((prev) => ({
+            ...prev,
+            backImage: images[0],
+            backPreviewUrl: URL.createObjectURL(images[0]),
+          }));
+        }
+      } else {
+        setActiveTab('images');
+        setFile(null);
+        setPdfDoc(null);
 
-      const newItems: ImageItem[] = images.map((img, idx) => ({
-        id: `img_${Date.now()}_${idx}_${Math.random()}`,
-        file: img,
-        previewUrl: URL.createObjectURL(img),
-        rotation: 0,
-        name: img.name,
-        size: img.size,
-      }));
+        const newItems: ImageItem[] = images.map((img, idx) => ({
+          id: `img_${Date.now()}_${idx}_${Math.random()}`,
+          file: img,
+          previewUrl: URL.createObjectURL(img),
+          rotation: 0,
+          name: img.name,
+          size: img.size,
+        }));
 
-      setImageItems((prev) => [...prev, ...newItems]);
-      setTotalPages((prev) => (imageItems.length === 0 ? newItems.length : prev + newItems.length));
+        setImageItems((prev) => [...prev, ...newItems]);
+        setTotalPages((prev) => (imageItems.length === 0 ? newItems.length : prev + newItems.length));
+      }
     }
   };
 
-  // Add more images
+  // DNI Specific Handlers
+  const handleDniFrontUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const f = e.target.files[0];
+      setDniOptions((prev) => ({
+        ...prev,
+        frontImage: f,
+        frontPreviewUrl: URL.createObjectURL(f),
+      }));
+    }
+  };
+
+  const handleDniBackUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const f = e.target.files[0];
+      setDniOptions((prev) => ({
+        ...prev,
+        backImage: f,
+        backPreviewUrl: URL.createObjectURL(f),
+      }));
+    }
+  };
+
+  const handleSwapDni = () => {
+    setDniOptions((prev) => ({
+      ...prev,
+      frontImage: prev.backImage,
+      frontPreviewUrl: prev.backPreviewUrl,
+      frontRotation: prev.backRotation,
+      backImage: prev.frontImage,
+      backPreviewUrl: prev.frontPreviewUrl,
+      backRotation: prev.frontRotation,
+    }));
+  };
+
+  // Add more images in images tab
   const handleAddMoreImages = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const moreImages = Array.from(e.target.files).filter(
@@ -191,18 +251,42 @@ export default function App() {
     });
   };
 
-  // Keep totalPages updated in images mode
+  // Render DNI preview whenever DNI options change
   useEffect(() => {
-    if (activeTab === 'images') {
-      setTotalPages(Math.max(1, imageItems.length));
-    }
-  }, [imageItems, activeTab]);
+    let isCancelled = false;
 
-  // Render preview canvas whenever options, file/images, or page changes
+    async function updateDniPreview() {
+      if (activeTab !== 'dni') return;
+      try {
+        // Render at 0.7 scale for smooth live preview
+        const canvas = await renderDniToA4Canvas(dniOptions, 0.7);
+        if (isCancelled) return;
+        const display = dniCanvasRef.current;
+        if (display) {
+          display.width = canvas.width;
+          display.height = canvas.height;
+          const ctx = display.getContext('2d');
+          if (ctx) ctx.drawImage(canvas, 0, 0);
+        }
+      } catch (err) {
+        console.error('Error rendering DNI preview:', err);
+      }
+    }
+
+    updateDniPreview();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [dniOptions, activeTab]);
+
+  // Render preview canvas for PDF & Images
   useEffect(() => {
     let isCancelled = false;
 
     async function updatePreview() {
+      if (activeTab === 'dni') return;
+
       let srcCanvas: HTMLCanvasElement | null = null;
 
       if (activeTab === 'pdf' && pdfDoc) {
@@ -228,8 +312,6 @@ export default function App() {
       }
 
       if (!srcCanvas) return;
-
-      originalCanvasRef.current = srcCanvas;
 
       let processedCanvas: HTMLCanvasElement;
       if (activeTab === 'images' && !options.applyEffectsToImages) {
@@ -274,18 +356,20 @@ export default function App() {
       let result;
       let downloadName = 'documento_scanned.pdf';
 
-      if (activeTab === 'pdf' && file) {
+      if (activeTab === 'dni') {
+        result = await processDniToPdf(dniOptions, (msg) => setProgressMsg(msg));
+        downloadName = 'DNI_Ambas_Caras_A4.pdf';
+      } else if (activeTab === 'pdf' && file) {
         result = await processFileToScannedPdf(file, options, (current, total, msg) => {
-          setProgress({ current, total, msg });
+          setProgressMsg(msg);
         });
         const baseName = file.name.replace(/\.[^/.]+$/, '');
         downloadName = `${baseName}_scanned.pdf`;
       } else if (activeTab === 'images' && imageItems.length > 0) {
         result = await processImagesToPdf(imageItems, options, (current, total, msg) => {
-          setProgress({ current, total, msg });
+          setProgressMsg(msg);
         });
-        const firstImgName = imageItems[0].name.replace(/\.[^/.]+$/, '');
-        downloadName = imageItems.length === 1 ? `${firstImgName}.pdf` : `Fotos_Convertidas_${imageItems.length}_pags.pdf`;
+        downloadName = `Fotos_Convertidas_${imageItems.length}_pags.pdf`;
       } else {
         return;
       }
@@ -319,7 +403,7 @@ export default function App() {
     }
   };
 
-  const hasContent = (activeTab === 'pdf' && file) || (activeTab === 'images' && imageItems.length > 0);
+  const hasStandardContent = (activeTab === 'pdf' && file) || (activeTab === 'images' && imageItems.length > 0);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col selection:bg-indigo-500 selection:text-white">
@@ -333,11 +417,11 @@ export default function App() {
             <div>
               <div className="flex items-center space-x-2">
                 <span className="font-bold text-slate-900 text-lg tracking-tight">AG Scan PDF</span>
-                <span className="bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-semibold border border-indigo-100">
-                  PDF & Fotos
+                <span className="bg-emerald-50 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-semibold border border-emerald-100">
+                  DNI & Documentos
                 </span>
               </div>
-              <p className="text-xs text-slate-500">Convierte PDFs e Imágenes (Fotos/Capturas) en documentos escaneados</p>
+              <p className="text-xs text-slate-500">Copia DNI en 1 hoja, PDFs y Fotos optimizadas</p>
             </div>
           </div>
 
@@ -360,9 +444,26 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Navigation Tabs: PDF vs Fotos/Imágenes */}
-        <div className="flex items-center justify-between mb-6 pb-2 border-b border-slate-200/80">
+        {/* Navigation Tabs */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6 pb-2 border-b border-slate-200/80">
           <div className="flex items-center space-x-2 bg-slate-200/70 p-1.5 rounded-2xl">
+            {/* TAB DNI */}
+            <button
+              onClick={() => setActiveTab('dni')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'dni'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <CreditCard className="w-4 h-4 text-indigo-600" />
+              <span>Copia DNI (Ambas Caras en 1 Hoja)</span>
+              {(dniOptions.frontImage || dniOptions.backImage) && (
+                <span className="w-2 h-2 rounded-full bg-emerald-500 ml-1"></span>
+              )}
+            </button>
+
+            {/* TAB PDF */}
             <button
               onClick={() => setActiveTab('pdf')}
               className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -372,10 +473,11 @@ export default function App() {
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span>Escanear Documento PDF</span>
+              <span>Escanear PDF</span>
               {file && <span className="w-2 h-2 rounded-full bg-emerald-500 ml-1"></span>}
             </button>
 
+            {/* TAB FOTOS */}
             <button
               onClick={() => setActiveTab('images')}
               className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -385,7 +487,7 @@ export default function App() {
               }`}
             >
               <ImageIcon className="w-4 h-4" />
-              <span>Fotos y Capturas a PDF</span>
+              <span>Fotos a PDF</span>
               {imageItems.length > 0 && (
                 <span className="bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.2 rounded-full ml-1">
                   {imageItems.length}
@@ -394,475 +496,328 @@ export default function App() {
             </button>
           </div>
 
-          <span className="hidden sm:inline-text text-xs text-slate-500">
-            {activeTab === 'pdf' ? 'Convierte y rota PDFs existentes' : 'Empaqueta 1 o varias fotos en un solo PDF'}
+          <span className="text-xs text-slate-500 hidden md:inline">
+            {activeTab === 'dni'
+              ? 'Une anverso y reverso de tu DNI en una sola hoja A4 liviana'
+              : activeTab === 'pdf'
+              ? 'Añade inclinación y textura de escáner a PDFs'
+              : 'Empaqueta varias imágenes en un PDF ordenado'}
           </span>
         </div>
 
-        {!hasContent ? (
-          /* Empty / Upload State */
-          <div className="max-w-3xl mx-auto mt-4">
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              className="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-3xl p-12 text-center bg-white shadow-sm hover:shadow-md transition-all cursor-pointer group"
-              onClick={() => document.getElementById('main-file-input')?.click()}
-            >
-              <input
-                id="main-file-input"
-                type="file"
-                multiple
-                accept=".pdf,image/png,image/jpeg,image/webp,image/bmp"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-              <div className="w-20 h-20 mx-auto rounded-3xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-5 group-hover:scale-105 group-hover:bg-indigo-100 transition-all">
-                {activeTab === 'pdf' ? <Upload className="w-10 h-10" /> : <ImageIcon className="w-10 h-10" />}
-              </div>
-              <h3 className="text-xl font-bold text-slate-800 mb-2">
-                {activeTab === 'pdf'
-                  ? 'Arrastra tu PDF aquí'
-                  : 'Arrastra tus fotos, capturas o imágenes aquí'}
-              </h3>
-              <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
-                {activeTab === 'pdf'
-                  ? 'Añade inclinación, bordes reales de hoja y optimización de peso.'
-                  : 'Puedes seleccionar una o múltiples imágenes (JPG, PNG, WebP) para unirlas en un solo PDF.'}
-              </p>
-              <button
-                type="button"
-                className="inline-flex items-center px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-md shadow-indigo-100 transition"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                {activeTab === 'pdf' ? 'Seleccionar archivo PDF' : 'Seleccionar Fotos o Imágenes (1 o varias)'}
-              </button>
-            </div>
-
-            {/* Feature Highlights */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-10">
-              <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
-                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
-                  <ImageIcon className="w-5 h-5" />
-                </div>
-                <h4 className="font-bold text-slate-900 text-sm mb-1">Fotos a PDF Unificado</h4>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Toma fotos de contratos o recibos con tu celular y conviértelos en un PDF ordenado con tamaño estándar A4.
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4">
-                  <HardDrive className="w-5 h-5" />
-                </div>
-                <h4 className="font-bold text-slate-900 text-sm mb-1">Control de Peso</h4>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Evita archivos gigantes. Reduce fotos de 5 MB a PDFs ligeros de ~150-250 KB por página.
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
-                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
-                  <Square className="w-5 h-5" />
-                </div>
-                <h4 className="font-bold text-slate-900 text-sm mb-1">Bordes Realistas</h4>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Al inclinar se proyecta la sombra natural de la hoja y el contorno físico del papel escaneado.
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : (
-          /* Workspace with Controls & Live Preview */
+        {/* -------------------- TAB DNI WORKSPACE -------------------- */}
+        {activeTab === 'dni' ? (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Left Column: Controls & Presets (5 cols) */}
+            {/* Left Column: Upload Cards & Options (5 cols) */}
             <div className="lg:col-span-5 space-y-5">
-              {/* Active File / Images Strip */}
-              {activeTab === 'pdf' && file && (
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex items-center justify-between">
-                  <div className="flex items-center space-x-3 truncate">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <div className="truncate">
-                      <h4 className="text-sm font-bold text-slate-900 truncate" title={file.name}>
-                        {file.name}
-                      </h4>
-                      <p className="text-xs text-slate-500">
-                        {(file.size / 1024).toFixed(0)} KB • {totalPages} {totalPages === 1 ? 'página' : 'páginas'}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setFile(null);
-                      setPdfDoc(null);
-                    }}
-                    className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg font-medium transition"
-                  >
-                    Cambiar
-                  </button>
+              {/* DNI Upload Boxes (Front & Back) */}
+              <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-2xs space-y-4">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center">
+                    <CreditCard className="w-4 h-4 mr-2 text-indigo-600" />
+                    Fotos del DNI (Ambos Lados)
+                  </h3>
+                  {(dniOptions.frontImage || dniOptions.backImage) && (
+                    <button
+                      onClick={handleSwapDni}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center bg-indigo-50 px-2 py-1 rounded-lg transition"
+                    >
+                      <ArrowUpDown className="w-3.5 h-3.5 mr-1" />
+                      Invertir Caras
+                    </button>
+                  )}
                 </div>
-              )}
 
-              {activeTab === 'images' && (
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <ImageIcon className="w-4 h-4 text-indigo-600" />
-                      <span className="text-xs font-bold text-slate-900">
-                        Fotos seleccionadas ({imageItems.length} {imageItems.length === 1 ? 'página' : 'páginas'})
-                      </span>
-                    </div>
+                {/* Box 1: Anverso (Front) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                    <span>1. Anverso (Parte Delantera / Foto)</span>
+                    {dniOptions.frontImage && (
+                      <span className="text-emerald-600 text-[11px] font-bold">✓ Cargado</span>
+                    )}
+                  </div>
 
-                    <label className="cursor-pointer text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition inline-flex items-center">
-                      <Plus className="w-3.5 h-3.5 mr-1" />
-                      Añadir más fotos
+                  {!dniOptions.frontPreviewUrl ? (
+                    <label className="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-2xl p-4 flex flex-col items-center justify-center bg-slate-50 hover:bg-indigo-50/40 cursor-pointer transition group">
                       <input
                         type="file"
-                        multiple
                         accept="image/*"
                         className="hidden"
-                        onChange={handleAddMoreImages}
+                        onChange={handleDniFrontUpload}
                       />
+                      <Upload className="w-6 h-6 text-slate-400 group-hover:text-indigo-600 mb-1" />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Subir foto del Anverso
+                      </span>
+                      <span className="text-[11px] text-slate-400 mt-0.5">JPG, PNG, foto de celular</span>
                     </label>
-                  </div>
-
-                  {/* Thumbnail gallery of images */}
-                  <div className="flex space-x-2 overflow-x-auto pb-2 pt-1 scrollbar-thin">
-                    {imageItems.map((item, idx) => (
-                      <div
-                        key={item.id}
-                        onClick={() => setCurrentPage(idx + 1)}
-                        className={`shrink-0 w-24 p-1.5 rounded-xl border transition-all cursor-pointer relative group ${
-                          currentPage === idx + 1
-                            ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/20'
-                            : 'border-slate-200 hover:border-slate-300 bg-slate-50'
-                        }`}
-                      >
-                        <div className="w-full h-24 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200/60 relative">
+                  ) : (
+                    <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
+                      <div className="flex items-center space-x-3 overflow-hidden">
+                        <div className="w-16 h-12 bg-white rounded-lg border border-slate-300 overflow-hidden flex items-center justify-center shrink-0">
                           <img
-                            src={item.previewUrl}
-                            alt={item.name}
-                            style={{ transform: `rotate(${item.rotation}deg)` }}
-                            className="max-h-full max-w-full object-contain transition-transform"
+                            src={dniOptions.frontPreviewUrl}
+                            alt="Anverso"
+                            style={{ transform: `rotate(${dniOptions.frontRotation}deg)` }}
+                            className="max-h-full max-w-full object-contain"
                           />
-                          <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[9px] px-1 rounded font-bold">
-                            #{idx + 1}
-                          </span>
                         </div>
-
-                        {/* Quick action icons for this image */}
-                        <div className="flex items-center justify-between mt-1 px-0.5 text-slate-500">
-                          <button
-                            title="Girar 90°"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRotateImage(idx);
-                            }}
-                            className="p-1 hover:text-indigo-600 hover:bg-slate-200 rounded"
-                          >
-                            <RotateCw className="w-3 h-3" />
-                          </button>
-                          <div className="flex space-x-0.5">
-                            {idx > 0 && (
-                              <button
-                                title="Mover a la izquierda"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleMoveImage(idx, 'left');
-                                }}
-                                className="p-0.5 hover:text-indigo-600"
-                              >
-                                <ArrowLeft className="w-3 h-3" />
-                              </button>
-                            )}
-                            {idx < imageItems.length - 1 && (
-                              <button
-                                title="Mover a la derecha"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleMoveImage(idx, 'right');
-                                }}
-                                className="p-0.5 hover:text-indigo-600"
-                              >
-                                <ArrowRight className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                          <button
-                            title="Eliminar"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteImage(idx);
-                            }}
-                            className="p-1 hover:text-rose-600 hover:bg-rose-50 rounded"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
+                        <div className="truncate">
+                          <p className="text-xs font-bold text-slate-800 truncate">
+                            {dniOptions.frontImage?.name || 'Anverso_DNI.jpg'}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            Rotación: {dniOptions.frontRotation}°
+                          </p>
                         </div>
                       </div>
-                    ))}
-                  </div>
 
-                  {/* Options specific to Image-to-PDF */}
-                  <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-slate-600 font-medium">Formato de hoja:</span>
-                      <select
-                        value={options.pageFormat}
-                        onChange={(e) => setOptions({ ...options, pageFormat: e.target.value as PageFormat })}
-                        className="bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-800"
-                      >
-                        <option value="a4">A4 (Estándar de oficina)</option>
-                        <option value="letter">Carta (Letter)</option>
-                        <option value="fit">Ajustar al tamaño de la foto</option>
-                      </select>
+                      <div className="flex items-center space-x-1 shrink-0">
+                        <button
+                          title="Girar 90°"
+                          onClick={() =>
+                            setDniOptions((prev) => ({
+                              ...prev,
+                              frontRotation: (prev.frontRotation + 90) % 360,
+                            }))
+                          }
+                          className="p-1.5 hover:bg-slate-200 text-slate-700 rounded-lg transition"
+                        >
+                          <RotateCw className="w-4 h-4" />
+                        </button>
+                        <button
+                          title="Quitar"
+                          onClick={() =>
+                            setDniOptions((prev) => ({
+                              ...prev,
+                              frontImage: null,
+                              frontPreviewUrl: null,
+                              frontRotation: 0,
+                            }))
+                          }
+                          className="p-1.5 hover:bg-rose-100 text-rose-600 rounded-lg transition"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
+                  )}
+                </div>
 
-                    <label className="flex items-center space-x-1.5 cursor-pointer font-medium text-slate-700">
+                {/* Box 2: Reverso (Back) */}
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                    <span>2. Reverso (Parte Posterior / Huella)</span>
+                    {dniOptions.backImage && (
+                      <span className="text-emerald-600 text-[11px] font-bold">✓ Cargado</span>
+                    )}
+                  </div>
+
+                  {!dniOptions.backPreviewUrl ? (
+                    <label className="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-2xl p-4 flex flex-col items-center justify-center bg-slate-50 hover:bg-indigo-50/40 cursor-pointer transition group">
                       <input
-                        type="checkbox"
-                        checked={options.applyEffectsToImages}
-                        onChange={(e) => setOptions({ ...options, applyEffectsToImages: e.target.checked })}
-                        className="rounded text-indigo-600"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleDniBackUpload}
                       />
-                      <span>Aplicar efecto escáner a fotos</span>
+                      <Upload className="w-6 h-6 text-slate-400 group-hover:text-indigo-600 mb-1" />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Subir foto del Reverso
+                      </span>
+                      <span className="text-[11px] text-slate-400 mt-0.5">JPG, PNG, foto de celular</span>
                     </label>
+                  ) : (
+                    <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-2xl border border-slate-200">
+                      <div className="flex items-center space-x-3 overflow-hidden">
+                        <div className="w-16 h-12 bg-white rounded-lg border border-slate-300 overflow-hidden flex items-center justify-center shrink-0">
+                          <img
+                            src={dniOptions.backPreviewUrl}
+                            alt="Reverso"
+                            style={{ transform: `rotate(${dniOptions.backRotation}deg)` }}
+                            className="max-h-full max-w-full object-contain"
+                          />
+                        </div>
+                        <div className="truncate">
+                          <p className="text-xs font-bold text-slate-800 truncate">
+                            {dniOptions.backImage?.name || 'Reverso_DNI.jpg'}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            Rotación: {dniOptions.backRotation}°
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-1 shrink-0">
+                        <button
+                          title="Girar 90°"
+                          onClick={() =>
+                            setDniOptions((prev) => ({
+                              ...prev,
+                              backRotation: (prev.backRotation + 90) % 360,
+                            }))
+                          }
+                          className="p-1.5 hover:bg-slate-200 text-slate-700 rounded-lg transition"
+                        >
+                          <RotateCw className="w-4 h-4" />
+                        </button>
+                        <button
+                          title="Quitar"
+                          onClick={() =>
+                            setDniOptions((prev) => ({
+                              ...prev,
+                              backImage: null,
+                              backPreviewUrl: null,
+                              backRotation: 0,
+                            }))
+                          }
+                          className="p-1.5 hover:bg-rose-100 text-rose-600 rounded-lg transition"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* DNI Format & Layout Options */}
+              <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-2xs space-y-4">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center">
+                  <Sliders className="w-4 h-4 mr-2 text-slate-700" />
+                  Ajustes de la Hoja A4
+                </h3>
+
+                {/* Color Mode */}
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-slate-700">Modo de Color</span>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <button
+                      onClick={() => setDniOptions({ ...dniOptions, colorMode: 'color' })}
+                      className={`p-2 rounded-xl border text-center transition ${
+                        dniOptions.colorMode === 'color'
+                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      🎨 Color Original
+                    </button>
+                    <button
+                      onClick={() => setDniOptions({ ...dniOptions, colorMode: 'bw' })}
+                      className={`p-2 rounded-xl border text-center transition ${
+                        dniOptions.colorMode === 'bw'
+                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      📄 Fotocopia B&N
+                    </button>
+                    <button
+                      onClick={() => setDniOptions({ ...dniOptions, colorMode: 'grayscale' })}
+                      className={`p-2 rounded-xl border text-center transition ${
+                        dniOptions.colorMode === 'grayscale'
+                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      🔘 Escala Grises
+                    </button>
                   </div>
                 </div>
-              )}
 
-              {/* SECTION: PESO Y TAMAÑO DE ARCHIVO */}
-              <div className="bg-white rounded-2xl p-5 border border-indigo-200/80 shadow-xs space-y-3 bg-gradient-to-b from-indigo-50/30 to-white">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-slate-900 flex items-center">
-                    <HardDrive className="w-4 h-4 mr-2 text-indigo-600" />
-                    Optimización de Peso (PDF Liviano)
-                  </h3>
-                  <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100/70 px-2 py-0.5 rounded-md">
-                    {QUALITY_PRESETS[options.qualityPreset].sizeEstimate}
-                  </span>
-                </div>
-
-                {/* Quality / Size Buttons */}
-                <div className="grid grid-cols-3 gap-2">
-                  {(Object.keys(QUALITY_PRESETS) as QualityPreset[]).map((qKey) => {
-                    const q = QUALITY_PRESETS[qKey];
-                    const isActive = options.qualityPreset === qKey;
-                    return (
-                      <button
-                        key={qKey}
-                        onClick={() => handleQualityPresetChange(qKey)}
-                        className={`p-2.5 rounded-xl border text-left transition-all ${
-                          isActive
-                            ? 'border-indigo-600 bg-indigo-600 text-white shadow-2xs font-semibold'
-                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="text-xs font-bold leading-tight">
-                          {qKey === 'light' ? '⚡ Ligero' : qKey === 'balanced' ? '⚖️ Equilibrado' : '🖨️ HD'}
-                        </div>
-                        <div className={`text-[10px] mt-0.5 ${isActive ? 'text-indigo-100' : 'text-slate-500'}`}>
-                          {q.sizeEstimate}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Quality Slider */}
-                <div className="pt-2 border-t border-slate-100 space-y-1">
+                {/* Card Scale / Size Slider */}
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
                   <div className="flex justify-between text-xs">
-                    <span className="font-medium text-slate-700">Calidad de Compresión JPEG</span>
-                    <span className="font-semibold text-indigo-600">{options.quality}%</span>
+                    <span className="font-medium text-slate-700">Tamaño del DNI en la hoja</span>
+                    <span className="font-semibold text-indigo-600">{Math.round(dniOptions.cardScale * 100)}%</span>
                   </div>
                   <input
                     type="range"
-                    min="35"
-                    max="90"
-                    step="5"
-                    value={options.quality}
+                    min="0.65"
+                    max="0.88"
+                    step="0.01"
+                    value={dniOptions.cardScale}
                     onChange={(e) =>
-                      setOptions({
-                        ...options,
-                        quality: parseInt(e.target.value),
+                      setDniOptions({
+                        ...dniOptions,
+                        cardScale: parseFloat(e.target.value),
                       })
                     }
                     className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
                   />
-                  <p className="text-[11px] text-slate-500">
-                    60-70% mantiene el archivo entre 120-250 KB por página.
-                  </p>
+                  <div className="flex justify-between text-[10px] text-slate-400">
+                    <span>Tamaño estándar</span>
+                    <span>Ampliado (Recomendado)</span>
+                  </div>
                 </div>
-              </div>
 
-              {/* SECTION: BORDES AL INCLINAR (Only if effects enabled) */}
-              {(activeTab === 'pdf' || options.applyEffectsToImages) && (
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
-                  <h3 className="text-sm font-bold text-slate-900 flex items-center justify-between">
+                {/* Vertical Gap Slider */}
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-medium text-slate-700">Separación entre caras</span>
+                    <span className="font-semibold text-slate-600">{dniOptions.verticalGap}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="20"
+                    max="75"
+                    step="5"
+                    value={dniOptions.verticalGap}
+                    onChange={(e) =>
+                      setDniOptions({
+                        ...dniOptions,
+                        verticalGap: parseInt(e.target.value),
+                      })
+                    }
+                    className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                  />
+                </div>
+
+                {/* Texture checkbox */}
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="flex items-center justify-between text-xs font-medium text-slate-700 cursor-pointer">
                     <span className="flex items-center">
-                      <Square className="w-4 h-4 mr-2 text-slate-700" />
-                      Bordes y Contorno de Inclinación
+                      <input
+                        type="checkbox"
+                        checked={dniOptions.applyScannerEffect}
+                        onChange={(e) =>
+                          setDniOptions({ ...dniOptions, applyScannerEffect: e.target.checked })
+                        }
+                        className="rounded text-indigo-600 mr-2"
+                      />
+                      Efecto de escáner sutil
                     </span>
-                  </h3>
-
-                  {/* Border Style Selector */}
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <button
-                      onClick={() => setOptions({ ...options, borderStyle: 'paper_shadow', scannerBedColor: 'light_gray' })}
-                      className={`p-2.5 rounded-xl border text-left transition ${
-                        options.borderStyle === 'paper_shadow'
-                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <div>📄 Hoja + Sombra</div>
-                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">Contorno y sombra física</div>
-                    </button>
-
-                    <button
-                      onClick={() => setOptions({ ...options, borderStyle: 'scanner_bed', scannerBedColor: 'dark_photocopy' })}
-                      className={`p-2.5 rounded-xl border text-left transition ${
-                        options.borderStyle === 'scanner_bed'
-                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <div>🖨️ Esquinas de Escáner</div>
-                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">Cristal oscuro en esquinas</div>
-                    </button>
-
-                    <button
-                      onClick={() => setOptions({ ...options, borderStyle: 'thin_line', scannerBedColor: 'white' })}
-                      className={`p-2.5 rounded-xl border text-left transition ${
-                        options.borderStyle === 'thin_line'
-                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <div>⚪ Borde Fino</div>
-                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">Línea delgada perimetral</div>
-                    </button>
-
-                    <button
-                      onClick={() => setOptions({ ...options, borderStyle: 'none' })}
-                      className={`p-2.5 rounded-xl border text-left transition ${
-                        options.borderStyle === 'none'
-                          ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <div>🚫 Sin Bordes</div>
-                      <div className="text-[10px] text-slate-500 font-normal mt-0.5">Fondo blanco uniforme</div>
-                    </button>
-                  </div>
-
-                  {/* Border Intensity Slider */}
-                  {options.borderStyle !== 'none' && (
-                    <div className="space-y-1 pt-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="font-medium text-slate-700">Intensidad / Visibilidad de Bordes</span>
-                        <span className="text-slate-500">{options.borderIntensity}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="20"
-                        max="100"
-                        step="5"
-                        value={options.borderIntensity}
-                        onChange={(e) => setOptions({ ...options, borderIntensity: parseInt(e.target.value) })}
-                        className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                      />
-                    </div>
-                  )}
-
-                  {/* Inclinación (Askew) */}
-                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                    <div className="flex items-center justify-between text-xs">
-                      <label className="font-medium text-slate-700 flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={options.askew}
-                          onChange={(e) => setOptions({ ...options, askew: e.target.checked })}
-                          className="rounded text-indigo-600 mr-2"
-                        />
-                        Inclinación aleatoria (Askew)
-                      </label>
-                      <span className="text-slate-500">±{options.askewAngle}°</span>
-                    </div>
-                    {options.askew && (
-                      <input
-                        type="range"
-                        min="0.2"
-                        max="2.5"
-                        step="0.1"
-                        value={options.askewAngle}
-                        onChange={(e) => setOptions({ ...options, askewAngle: parseFloat(e.target.value) })}
-                        className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                      />
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Presets Rápidos */}
-              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center mb-3">
-                  <Sparkles className="w-4 h-4 mr-2 text-indigo-600" />
-                  Presets de Estilo
-                </h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(PRESETS).map(([key, preset]) => (
-                    <button
-                      key={key}
-                      onClick={() => handleSelectPreset(key)}
-                      className={`text-left p-2.5 rounded-xl border transition-all ${
-                        selectedPreset === key
-                          ? 'border-indigo-600 bg-indigo-50/70 shadow-2xs ring-1 ring-indigo-500'
-                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="text-base mb-0.5">{preset.icon}</div>
-                      <div className="font-semibold text-xs text-slate-900">{preset.name}</div>
-                      <div className="text-[10px] text-slate-500 line-clamp-2 mt-0.5 leading-tight">
-                        {preset.description}
-                      </div>
-                    </button>
-                  ))}
+                    <span className="text-[11px] text-slate-400">Micro-textura natural</span>
+                  </label>
                 </div>
               </div>
 
-              {/* Action Button & Progress */}
-              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
+              {/* DNI Process Button */}
+              <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
+                <div className="flex items-center justify-between text-xs text-slate-500 pb-1">
+                  <span>Peso estimado:</span>
+                  <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                    ~100 - 180 KB (1 Hoja A4)
+                  </span>
+                </div>
+
                 {isProcessing ? (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs font-semibold text-slate-700">
-                      <span>{progress.msg || 'Procesando...'}</span>
-                      <span>
-                        {progress.total > 0
-                          ? `${Math.round((progress.current / progress.total) * 100)}%`
-                          : ''}
-                      </span>
-                    </div>
+                  <div className="space-y-2 py-2">
+                    <p className="text-xs font-semibold text-slate-700 text-center">
+                      {progressMsg || 'Generando copia de DNI en A4...'}
+                    </p>
                     <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                      <div
-                        className="bg-indigo-600 h-full transition-all duration-300 rounded-full"
-                        style={{
-                          width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 15}%`,
-                        }}
-                      />
+                      <div className="bg-indigo-600 h-full w-2/3 animate-pulse rounded-full" />
                     </div>
                   </div>
                 ) : (
                   <button
+                    disabled={!dniOptions.frontPreviewUrl && !dniOptions.backPreviewUrl}
                     onClick={handleProcessAndDownload}
-                    className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md shadow-indigo-100 flex items-center justify-center space-x-2 transition cursor-pointer"
+                    className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md shadow-indigo-100 flex items-center justify-center space-x-2 transition cursor-pointer"
                   >
                     <Download className="w-5 h-5" />
-                    <span>
-                      Descargar PDF {activeTab === 'images' ? 'desde Fotos' : 'Escaneado'} ({totalPages}{' '}
-                      {totalPages === 1 ? 'pág' : 'págs'})
-                    </span>
+                    <span>Descargar PDF DNI (1 Hoja A4)</span>
                   </button>
                 )}
 
@@ -870,9 +825,9 @@ export default function App() {
                   <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center space-x-3 text-xs text-emerald-800">
                     <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                     <div>
-                      <p className="font-semibold">¡PDF generado con éxito!</p>
+                      <p className="font-semibold">¡PDF de DNI generado con éxito!</p>
                       <p className="text-emerald-700 mt-0.5">
-                        Original: {successInfo.originalSize} &rarr; Escaneado: <strong>{successInfo.newSize}</strong> ({successInfo.reduction})
+                        Fotos originales: {successInfo.originalSize} &rarr; PDF final: <strong>{successInfo.newSize}</strong> ({successInfo.reduction})
                       </p>
                     </div>
                   </div>
@@ -880,77 +835,459 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Column: Live Interactive Preview (7 cols) */}
+            {/* Right Column: Live DNI A4 Preview (7 cols) */}
             <div className="lg:col-span-7 bg-white rounded-3xl p-6 border border-slate-200 shadow-2xs space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center space-x-2">
                   <Eye className="w-4 h-4 text-indigo-600" />
                   <span className="font-bold text-slate-900 text-sm">
-                    Vista Previa {activeTab === 'images' ? `(Foto #${currentPage})` : `(Página #${currentPage})`}
+                    Vista Previa de la Hoja A4 (Ambas Caras)
                   </span>
                 </div>
-
-                {/* Original vs Scanned Toggle */}
-                <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
-                  <button
-                    onClick={() => setPreviewMode('scanned')}
-                    className={`px-3 py-1 rounded-lg transition ${
-                      previewMode === 'scanned'
-                        ? 'bg-white text-indigo-700 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Resultado
-                  </button>
-                  <button
-                    onClick={() => setPreviewMode('original')}
-                    className={`px-3 py-1 rounded-lg transition ${
-                      previewMode === 'original'
-                        ? 'bg-white text-indigo-700 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Original
-                  </button>
-                </div>
+                <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg font-semibold">
+                  A4 Vertical (595 × 842 pt)
+                </span>
               </div>
 
-              {/* Canvas Preview Container */}
-              <div className="bg-slate-200/60 rounded-2xl p-6 flex items-center justify-center min-h-[480px] overflow-hidden border border-slate-300/40">
+              {/* Canvas A4 Container */}
+              <div className="bg-slate-200/70 rounded-2xl p-6 flex items-center justify-center min-h-[520px] overflow-hidden border border-slate-300/40">
                 <canvas
-                  ref={previewCanvasRef}
-                  className="max-h-[580px] w-auto max-w-full shadow-xl rounded-xs bg-white"
+                  ref={dniCanvasRef}
+                  className="max-h-[620px] w-auto max-w-full shadow-2xl rounded-xs bg-white border border-slate-300"
                 />
               </div>
 
-              {/* Page Navigator */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    disabled={currentPage <= 1}
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className="inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                  >
-                    <ChevronLeft className="w-4 h-4 mr-1" />
-                    Anterior
-                  </button>
-
-                  <span className="text-xs font-semibold text-slate-600">
-                    Página {currentPage} de {totalPages}
-                  </span>
-
-                  <button
-                    disabled={currentPage >= totalPages}
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    className="inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                  >
-                    Siguiente
-                    <ChevronRight className="w-4 h-4 ml-1" />
-                  </button>
-                </div>
-              )}
+              <p className="text-xs text-slate-500 text-center">
+                El documento se genera en formato oficial A4 con ambas caras centradas vertical y horizontalmente.
+              </p>
             </div>
           </div>
+        ) : (
+          /* -------------------- TAB PDF & IMAGES WORKSPACE -------------------- */
+          !hasStandardContent ? (
+            /* Empty / Upload State for PDF & Images */
+            <div className="max-w-3xl mx-auto mt-4">
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
+                className="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-3xl p-12 text-center bg-white shadow-sm hover:shadow-md transition-all cursor-pointer group"
+                onClick={() => document.getElementById('main-file-input')?.click()}
+              >
+                <input
+                  id="main-file-input"
+                  type="file"
+                  multiple
+                  accept=".pdf,image/png,image/jpeg,image/webp,image/bmp"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <div className="w-20 h-20 mx-auto rounded-3xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-5 group-hover:scale-105 group-hover:bg-indigo-100 transition-all">
+                  {activeTab === 'pdf' ? <Upload className="w-10 h-10" /> : <ImageIcon className="w-10 h-10" />}
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">
+                  {activeTab === 'pdf'
+                    ? 'Arrastra tu PDF aquí'
+                    : 'Arrastra tus fotos, capturas o imágenes aquí'}
+                </h3>
+                <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
+                  {activeTab === 'pdf'
+                    ? 'Añade inclinación, bordes reales de hoja y optimización de peso.'
+                    : 'Puedes seleccionar una o múltiples imágenes (JPG, PNG, WebP) para unirlas en un solo PDF.'}
+                </p>
+                <button
+                  type="button"
+                  className="inline-flex items-center px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-md shadow-indigo-100 transition"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  {activeTab === 'pdf' ? 'Seleccionar archivo PDF' : 'Seleccionar Fotos o Imágenes (1 o varias)'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Active PDF / Images Workspace */
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Left Column (5 cols) */}
+              <div className="lg:col-span-5 space-y-5">
+                {activeTab === 'pdf' && file && (
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex items-center justify-between">
+                    <div className="flex items-center space-x-3 truncate">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div className="truncate">
+                        <h4 className="text-sm font-bold text-slate-900 truncate" title={file.name}>
+                          {file.name}
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          {(file.size / 1024).toFixed(0)} KB • {totalPages} {totalPages === 1 ? 'página' : 'páginas'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setFile(null);
+                        setPdfDoc(null);
+                      }}
+                      className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg font-medium transition"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                )}
+
+                {activeTab === 'images' && (
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <ImageIcon className="w-4 h-4 text-indigo-600" />
+                        <span className="text-xs font-bold text-slate-900">
+                          Fotos seleccionadas ({imageItems.length} {imageItems.length === 1 ? 'página' : 'páginas'})
+                        </span>
+                      </div>
+
+                      <label className="cursor-pointer text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition inline-flex items-center">
+                        <Plus className="w-3.5 h-3.5 mr-1" />
+                        Añadir más fotos
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleAddMoreImages}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="flex space-x-2 overflow-x-auto pb-2 pt-1 scrollbar-thin">
+                      {imageItems.map((item, idx) => (
+                        <div
+                          key={item.id}
+                          onClick={() => setCurrentPage(idx + 1)}
+                          className={`shrink-0 w-24 p-1.5 rounded-xl border transition-all cursor-pointer relative group ${
+                            currentPage === idx + 1
+                              ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/20'
+                              : 'border-slate-200 hover:border-slate-300 bg-slate-50'
+                          }`}
+                        >
+                          <div className="w-full h-24 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200/60 relative">
+                            <img
+                              src={item.previewUrl}
+                              alt={item.name}
+                              style={{ transform: `rotate(${item.rotation}deg)` }}
+                              className="max-h-full max-w-full object-contain transition-transform"
+                            />
+                            <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[9px] px-1 rounded font-bold">
+                              #{idx + 1}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between mt-1 px-0.5 text-slate-500">
+                            <button
+                              title="Girar 90°"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRotateImage(idx);
+                              }}
+                              className="p-1 hover:text-indigo-600 hover:bg-slate-200 rounded"
+                            >
+                              <RotateCw className="w-3 h-3" />
+                            </button>
+                            <div className="flex space-x-0.5">
+                              {idx > 0 && (
+                                <button
+                                  title="Mover a la izquierda"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveImage(idx, 'left');
+                                  }}
+                                  className="p-0.5 hover:text-indigo-600"
+                                >
+                                  <ArrowLeft className="w-3 h-3" />
+                                </button>
+                              )}
+                              {idx < imageItems.length - 1 && (
+                                <button
+                                  title="Mover a la derecha"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveImage(idx, 'right');
+                                  }}
+                                  className="p-0.5 hover:text-indigo-600"
+                                >
+                                  <ArrowRight className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                            <button
+                              title="Eliminar"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteImage(idx);
+                              }}
+                              className="p-1 hover:text-rose-600 hover:bg-rose-50 rounded"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-slate-600 font-medium">Formato de hoja:</span>
+                        <select
+                          value={options.pageFormat}
+                          onChange={(e) => setOptions({ ...options, pageFormat: e.target.value as PageFormat })}
+                          className="bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-800"
+                        >
+                          <option value="a4">A4 (Estándar de oficina)</option>
+                          <option value="letter">Carta (Letter)</option>
+                          <option value="fit">Ajustar al tamaño de la foto</option>
+                        </select>
+                      </div>
+
+                      <label className="flex items-center space-x-1.5 cursor-pointer font-medium text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={options.applyEffectsToImages}
+                          onChange={(e) => setOptions({ ...options, applyEffectsToImages: e.target.checked })}
+                          className="rounded text-indigo-600"
+                        />
+                        <span>Aplicar efecto escáner a fotos</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Optimización de Peso */}
+                <div className="bg-white rounded-2xl p-5 border border-indigo-200/80 shadow-xs space-y-3 bg-gradient-to-b from-indigo-50/30 to-white">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center">
+                      <HardDrive className="w-4 h-4 mr-2 text-indigo-600" />
+                      Optimización de Peso (PDF Liviano)
+                    </h3>
+                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100/70 px-2 py-0.5 rounded-md">
+                      {QUALITY_PRESETS[options.qualityPreset].sizeEstimate}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    {(Object.keys(QUALITY_PRESETS) as QualityPreset[]).map((qKey) => {
+                      const q = QUALITY_PRESETS[qKey];
+                      const isActive = options.qualityPreset === qKey;
+                      return (
+                        <button
+                          key={qKey}
+                          onClick={() => handleQualityPresetChange(qKey)}
+                          className={`p-2.5 rounded-xl border text-left transition-all ${
+                            isActive
+                              ? 'border-indigo-600 bg-indigo-600 text-white shadow-2xs font-semibold'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="text-xs font-bold leading-tight">
+                            {qKey === 'light' ? '⚡ Ligero' : qKey === 'balanced' ? '⚖️ Equilibrado' : '🖨️ HD'}
+                          </div>
+                          <div className={`text-[10px] mt-0.5 ${isActive ? 'text-indigo-100' : 'text-slate-500'}`}>
+                            {q.sizeEstimate}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-medium text-slate-700">Calidad de Compresión JPEG</span>
+                      <span className="font-semibold text-indigo-600">{options.quality}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="35"
+                      max="90"
+                      step="5"
+                      value={options.quality}
+                      onChange={(e) =>
+                        setOptions({
+                          ...options,
+                          quality: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                {/* Bordes al inclinar */}
+                {(activeTab === 'pdf' || options.applyEffectsToImages) && (
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center justify-between">
+                      <span className="flex items-center">
+                        <Square className="w-4 h-4 mr-2 text-slate-700" />
+                        Bordes y Contorno de Inclinación
+                      </span>
+                    </h3>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <button
+                        onClick={() => setOptions({ ...options, borderStyle: 'paper_shadow', scannerBedColor: 'light_gray' })}
+                        className={`p-2.5 rounded-xl border text-left transition ${
+                          options.borderStyle === 'paper_shadow'
+                            ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <div>📄 Hoja + Sombra</div>
+                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">Contorno y sombra física</div>
+                      </button>
+
+                      <button
+                        onClick={() => setOptions({ ...options, borderStyle: 'scanner_bed', scannerBedColor: 'dark_photocopy' })}
+                        className={`p-2.5 rounded-xl border text-left transition ${
+                          options.borderStyle === 'scanner_bed'
+                            ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <div>🖨️ Esquinas de Escáner</div>
+                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">Cristal oscuro en esquinas</div>
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                      <div className="flex items-center justify-between text-xs">
+                        <label className="font-medium text-slate-700 flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={options.askew}
+                            onChange={(e) => setOptions({ ...options, askew: e.target.checked })}
+                            className="rounded text-indigo-600 mr-2"
+                          />
+                          Inclinación aleatoria (Askew)
+                        </label>
+                        <span className="text-slate-500">±{options.askewAngle}°</span>
+                      </div>
+                      {options.askew && (
+                        <input
+                          type="range"
+                          min="0.2"
+                          max="2.5"
+                          step="0.1"
+                          value={options.askewAngle}
+                          onChange={(e) => setOptions({ ...options, askewAngle: parseFloat(e.target.value) })}
+                          className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Process Button */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
+                  {isProcessing ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-slate-700 text-center">{progressMsg || 'Procesando...'}</p>
+                      <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                        <div className="bg-indigo-600 h-full w-2/3 animate-pulse rounded-full" />
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleProcessAndDownload}
+                      className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md shadow-indigo-100 flex items-center justify-center space-x-2 transition cursor-pointer"
+                    >
+                      <Download className="w-5 h-5" />
+                      <span>
+                        Descargar PDF {activeTab === 'images' ? 'desde Fotos' : 'Escaneado'} ({totalPages}{' '}
+                        {totalPages === 1 ? 'pág' : 'págs'})
+                      </span>
+                    </button>
+                  )}
+
+                  {successInfo && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center space-x-3 text-xs text-emerald-800">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                      <div>
+                        <p className="font-semibold">¡PDF generado con éxito!</p>
+                        <p className="text-emerald-700 mt-0.5">
+                          Original: {successInfo.originalSize} &rarr; Escaneado: <strong>{successInfo.newSize}</strong> ({successInfo.reduction})
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column (7 cols) */}
+              <div className="lg:col-span-7 bg-white rounded-3xl p-6 border border-slate-200 shadow-2xs space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                  <div className="flex items-center space-x-2">
+                    <Eye className="w-4 h-4 text-indigo-600" />
+                    <span className="font-bold text-slate-900 text-sm">
+                      Vista Previa {activeTab === 'images' ? `(Foto #${currentPage})` : `(Página #${currentPage})`}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                    <button
+                      onClick={() => setPreviewMode('scanned')}
+                      className={`px-3 py-1 rounded-lg transition ${
+                        previewMode === 'scanned'
+                          ? 'bg-white text-indigo-700 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Resultado
+                    </button>
+                    <button
+                      onClick={() => setPreviewMode('original')}
+                      className={`px-3 py-1 rounded-lg transition ${
+                        previewMode === 'original'
+                          ? 'bg-white text-indigo-700 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Original
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-slate-200/60 rounded-2xl p-6 flex items-center justify-center min-h-[480px] overflow-hidden border border-slate-300/40">
+                  <canvas
+                    ref={previewCanvasRef}
+                    className="max-h-[580px] w-auto max-w-full shadow-xl rounded-xs bg-white"
+                  />
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-2">
+                    <button
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      className="inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" />
+                      Anterior
+                    </button>
+
+                    <span className="text-xs font-semibold text-slate-600">
+                      Página {currentPage} de {totalPages}
+                    </span>
+
+                    <button
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      className="inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      Siguiente
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
         )}
       </main>
 
@@ -989,13 +1326,13 @@ export default function App() {
                   Opción Rápida: Desde tu terminal con Vercel CLI
                 </div>
                 <p className="text-slate-600">
-                  Ya tienes Vercel CLI instalado en esta máquina. Abre PowerShell en esta carpeta y ejecuta:
+                  Abre PowerShell en esta carpeta y ejecuta:
                 </p>
                 <code className="block bg-slate-900 text-slate-100 p-2.5 rounded-xl font-mono text-xs">
                   vercel
                 </code>
                 <p className="text-[11px] text-slate-500">
-                  Sigue las 3 preguntas en pantalla (Enter, Enter) y tendrás tu URL pública (ejemplo: <code>https://ag-scan-pdf.vercel.app</code>) en 30 segundos.
+                  Presiona Enter a cada pregunta y tendrás tu URL pública en 30 segundos.
                 </p>
               </div>
 
@@ -1007,19 +1344,13 @@ export default function App() {
                   Opción GitHub: Despliegue automático
                 </div>
                 <p className="text-slate-600">
-                  Si prefieres vincularlo a tu cuenta de GitHub:
+                  Tu proyecto ya está sincronizado en tu cuenta de GitHub:
                 </p>
-                <ol className="list-decimal list-inside space-y-1 text-slate-600 pl-1">
-                  <li>Sube este proyecto a tu repositorio de GitHub.</li>
-                  <li>Entra a <a href="https://vercel.com/new" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-semibold">vercel.com/new</a>.</li>
-                  <li>Importa el repositorio y haz clic en <strong>Deploy</strong>.</li>
-                </ol>
-              </div>
-
-              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-800">
-                <strong>¿Por qué es perfecto para laptops corporativas?</strong>
-                <p className="mt-0.5">
-                  Todo el procesamiento de PDF se realiza dentro de la memoria del navegador. No se instalan ejecutables ni se envían datos confidenciales a ningún servidor.
+                <p className="font-mono text-indigo-700 bg-indigo-50 p-2 rounded-lg text-[11px]">
+                  https://github.com/AlexanderGamonal/pdf-scan-AG
+                </p>
+                <p className="text-slate-600">
+                  Solo entra a <a href="https://vercel.com/new" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-semibold">vercel.com/new</a> y haz clic en <strong>Deploy</strong>.
                 </p>
               </div>
             </div>

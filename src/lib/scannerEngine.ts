@@ -17,6 +17,34 @@ export interface ImageItem {
   size: number;
 }
 
+export interface DniOptions {
+  frontImage: File | null;
+  frontRotation: number;
+  frontPreviewUrl: string | null;
+  backImage: File | null;
+  backRotation: number;
+  backPreviewUrl: string | null;
+  cardScale: number; // 0.60 to 0.90 (default 0.76)
+  verticalGap: number; // 20 to 80 (default 45)
+  colorMode: 'color' | 'bw' | 'grayscale'; // default 'color'
+  applyScannerEffect: boolean;
+  quality: number; // default 68 (produces ~90-180 KB)
+}
+
+export const DEFAULT_DNI_OPTIONS: DniOptions = {
+  frontImage: null,
+  frontRotation: 0,
+  frontPreviewUrl: null,
+  backImage: null,
+  backRotation: 0,
+  backPreviewUrl: null,
+  cardScale: 0.78,
+  verticalGap: 45,
+  colorMode: 'color',
+  applyScannerEffect: true,
+  quality: 68,
+};
+
 export interface ScannerOptions {
   quality: number; // 30 to 95 (default 68)
   qualityPreset: QualityPreset;
@@ -210,14 +238,12 @@ export function applyScannerEffects(
   const width = srcCanvas.width;
   const height = srcCanvas.height;
 
-  // Pseudo-random helper
   let seed = deterministicSeed ?? Math.random() * 10000;
   const rand = () => {
     seed = (seed * 9301 + 49297) % 233280;
     return seed / 233280;
   };
 
-  // 1. Calculate rotation angle
   let angle = 0;
   if (options.askew) {
     const maxA = options.askewAngle || 0.8;
@@ -241,7 +267,6 @@ export function applyScannerEffects(
   const ctx = outCanvas.getContext('2d');
   if (!ctx) return srcCanvas;
 
-  // 2. Fill the scanner bed background
   const intensity = (options.borderIntensity || 70) / 100;
   if (options.borderStyle === 'scanner_bed') {
     if (options.scannerBedColor === 'dark_photocopy') {
@@ -257,7 +282,6 @@ export function applyScannerEffects(
   }
   ctx.fillRect(0, 0, rotWidth, rotHeight);
 
-  // 3. Draw the paper sheet with shadow and border
   ctx.save();
   ctx.translate(rotWidth / 2, rotHeight / 2);
   ctx.rotate(rad);
@@ -288,7 +312,6 @@ export function applyScannerEffects(
   ctx.drawImage(srcCanvas, -width / 2, -height / 2);
   ctx.filter = 'none';
 
-  // 4. Draw paper edges
   if (options.borderStyle === 'paper_shadow') {
     const lineAlpha = 0.18 + intensity * 0.32;
     ctx.strokeStyle = `rgba(30, 30, 35, ${lineAlpha})`;
@@ -308,7 +331,6 @@ export function applyScannerEffects(
 
   ctx.restore();
 
-  // 5. Pixel adjustments: Contrast, Brightness, B&W, Smooth Grain
   const imgData = ctx.getImageData(0, 0, rotWidth, rotHeight);
   const data = imgData.data;
 
@@ -446,7 +468,6 @@ export async function renderImageItemToCanvas(
   const rot = ((item.rotation % 360) + 360) % 360;
   const isSwap = rot === 90 || rot === 270;
 
-  // Scale down if oversized (e.g. 48MP phone photos) to save RAM and optimize file size
   let scale = 1.0;
   const maxSide = Math.max(naturalW, naturalH);
   if (maxSide > maxDimension) {
@@ -493,7 +514,282 @@ export function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Pr
 }
 
 /**
- * Process multiple images (photos, screenshots) into a single compiled PDF
+ * Render helper for an individual DNI side (Front or Back) onto an isolated sub-canvas
+ */
+async function loadAndPrepareCardCanvas(
+  imgUrl: string,
+  rotation: number,
+  maxSide: number = 1200
+): Promise<HTMLCanvasElement> {
+  const img = new Image();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+    img.src = imgUrl;
+  });
+
+  const rot = ((rotation % 360) + 360) % 360;
+  const isSwap = rot === 90 || rot === 270;
+
+  let scale = 1.0;
+  const largest = Math.max(img.naturalWidth, img.naturalHeight);
+  if (largest > maxSide) {
+    scale = maxSide / largest;
+  }
+
+  const baseW = Math.round(img.naturalWidth * scale);
+  const baseH = Math.round(img.naturalHeight * scale);
+  const cardW = isSwap ? baseH : baseW;
+  const cardH = isSwap ? baseW : baseH;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cardW;
+  canvas.height = cardH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Card canvas failed');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, cardW, cardH);
+
+  ctx.save();
+  ctx.translate(cardW / 2, cardH / 2);
+  ctx.rotate((rot * Math.PI) / 180);
+  ctx.drawImage(img, -baseW / 2, -baseH / 2, baseW, baseH);
+  ctx.restore();
+
+  return canvas;
+}
+
+/**
+ * Render both DNI sides (Front top, Back bottom) onto a standard A4 sheet canvas
+ */
+export async function renderDniToA4Canvas(
+  options: DniOptions,
+  scaleFactor: number = 1.0 // 1.0 = ~1240x1754 px
+): Promise<HTMLCanvasElement> {
+  // Standard A4 at 150 DPI: 1240 x 1754 px
+  const a4Width = Math.round(1240 * scaleFactor);
+  const a4Height = Math.round(1754 * scaleFactor);
+
+  const a4Canvas = document.createElement('canvas');
+  a4Canvas.width = a4Width;
+  a4Canvas.height = a4Height;
+  const ctx = a4Canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not create A4 canvas');
+
+  // Fill clean white A4 background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, a4Width, a4Height);
+
+  // Load front and back card canvases if available
+  let frontCanvas: HTMLCanvasElement | null = null;
+  let backCanvas: HTMLCanvasElement | null = null;
+
+  if (options.frontPreviewUrl) {
+    frontCanvas = await loadAndPrepareCardCanvas(options.frontPreviewUrl, options.frontRotation, 1400);
+  }
+  if (options.backPreviewUrl) {
+    backCanvas = await loadAndPrepareCardCanvas(options.backPreviewUrl, options.backRotation, 1400);
+  }
+
+  const targetWidth = Math.round(a4Width * (options.cardScale || 0.78));
+  const vGap = Math.round((options.verticalGap || 45) * scaleFactor);
+
+  // Function to draw one card centered with realistic subtle paper/card border
+  const drawCard = (cardCanvas: HTMLCanvasElement, yPos: number): number => {
+    const cardAspect = cardCanvas.width / cardCanvas.height;
+    const drawW = targetWidth;
+    const drawH = Math.round(targetWidth / cardAspect);
+    const xPos = Math.round((a4Width - drawW) / 2);
+
+    ctx.save();
+    // Subtle shadow around the card
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.12)';
+    ctx.shadowBlur = Math.round(6 * scaleFactor);
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = Math.round(2 * scaleFactor);
+
+    // Card white base
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(xPos, yPos, drawW, drawH);
+    ctx.shadowColor = 'transparent';
+
+    // Draw card photo
+    ctx.drawImage(cardCanvas, xPos, yPos, drawW, drawH);
+
+    // Subtle 1px card boundary
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)';
+    ctx.lineWidth = Math.max(1, Math.round(1 * scaleFactor));
+    ctx.strokeRect(xPos, yPos, drawW, drawH);
+
+    ctx.restore();
+    return drawH;
+  };
+
+  // If both are present: Front on top, Back on bottom, vertically centered
+  if (frontCanvas && backCanvas) {
+    const frontAspect = frontCanvas.width / frontCanvas.height;
+    const backAspect = backCanvas.width / backCanvas.height;
+    const frontH = Math.round(targetWidth / frontAspect);
+    const backH = Math.round(targetWidth / backAspect);
+
+    const totalContentH = frontH + vGap + backH;
+    const startY = Math.max(40, Math.round((a4Height - totalContentH) / 2));
+
+    drawCard(frontCanvas, startY);
+    drawCard(backCanvas, startY + frontH + vGap);
+  } else if (frontCanvas) {
+    // Only front uploaded so far
+    const frontAspect = frontCanvas.width / frontCanvas.height;
+    const frontH = Math.round(targetWidth / frontAspect);
+    const startY = Math.round((a4Height / 2 - frontH) / 1.5);
+    drawCard(frontCanvas, startY);
+
+    // Placeholder box for back
+    const phH = frontH;
+    const phY = startY + frontH + vGap;
+    const xPos = Math.round((a4Width - targetWidth) / 2);
+
+    ctx.save();
+    ctx.setLineDash([8, 6]);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(xPos, phY, targetWidth, phH);
+    ctx.fillStyle = '#64748b';
+    ctx.font = `${Math.round(24 * scaleFactor)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Reverso del DNI (Parte posterior)', a4Width / 2, phY + phH / 2);
+    ctx.restore();
+  } else if (backCanvas) {
+    // Only back uploaded so far
+    const backAspect = backCanvas.width / backCanvas.height;
+    const backH = Math.round(targetWidth / backAspect);
+    const startY = Math.round(a4Height / 2);
+    drawCard(backCanvas, startY);
+
+    const phH = backH;
+    const phY = startY - phH - vGap;
+    const xPos = Math.round((a4Width - targetWidth) / 2);
+
+    ctx.save();
+    ctx.setLineDash([8, 6]);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(xPos, phY, targetWidth, phH);
+    ctx.fillStyle = '#64748b';
+    ctx.font = `${Math.round(24 * scaleFactor)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Anverso del DNI (Parte delantera)', a4Width / 2, phY + phH / 2);
+    ctx.restore();
+  } else {
+    // Both empty: draw placeholders
+    const h = Math.round(targetWidth / 1.586);
+    const totalH = h * 2 + vGap;
+    const startY = Math.round((a4Height - totalH) / 2);
+    const xPos = Math.round((a4Width - targetWidth) / 2);
+
+    ctx.save();
+    ctx.setLineDash([8, 6]);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+
+    ctx.strokeRect(xPos, startY, targetWidth, h);
+    ctx.fillStyle = '#64748b';
+    ctx.font = `${Math.round(24 * scaleFactor)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('1. Sube la foto del Anverso (Frente)', a4Width / 2, startY + h / 2);
+
+    ctx.strokeRect(xPos, startY + h + vGap, targetWidth, h);
+    ctx.fillText('2. Sube la foto del Reverso (Atrás)', a4Width / 2, startY + h + vGap + h / 2);
+    ctx.restore();
+  }
+
+  // Color mode transformations (B&W photocopy or grayscale)
+  if (options.colorMode === 'bw' || options.colorMode === 'grayscale' || options.applyScannerEffect) {
+    const imgData = ctx.getImageData(0, 0, a4Width, a4Height);
+    const d = imgData.data;
+
+    for (let i = 0; i < d.length; i += 4) {
+      let r = d[i];
+      let g = d[i + 1];
+      let b = d[i + 2];
+
+      if (options.colorMode === 'bw') {
+        let gray = 0.299 * r + 0.587 * g + 0.114 * b;
+        // High-contrast photocopy
+        gray = 1.35 * (gray - 128) + 128;
+        if (gray > 220) gray = 255;
+        else if (gray < 40) gray = 0;
+        r = g = b = gray;
+      } else if (options.colorMode === 'grayscale') {
+        let gray = 0.299 * r + 0.587 * g + 0.114 * b;
+        r = g = b = gray;
+      }
+
+      if (options.applyScannerEffect && (i % 8 === 0)) {
+        const grain = (Math.random() - 0.5) * 6;
+        r += grain;
+        g += grain;
+        b += grain;
+      }
+
+      d[i] = Math.min(255, Math.max(0, r));
+      d[i + 1] = Math.min(255, Math.max(0, g));
+      d[i + 2] = Math.min(255, Math.max(0, b));
+    }
+    ctx.putImageData(imgData, 0, 0);
+  }
+
+  return a4Canvas;
+}
+
+/**
+ * Process DNI front & back into a single lightweight A4 PDF
+ */
+export async function processDniToPdf(
+  options: DniOptions,
+  onProgress?: (msg: string) => void
+): Promise<{ blob: Blob; originalSize: number; newSize: number }> {
+  if (!options.frontPreviewUrl && !options.backPreviewUrl) {
+    throw new Error('Debes subir al menos una cara del DNI');
+  }
+
+  onProgress?.('Renderizando DNI en hoja A4 estándar...');
+  const canvas = await renderDniToA4Canvas(options, 1.0);
+
+  onProgress?.('Comprimiendo y optimizando peso del documento...');
+  const jpegBlob = await canvasToJpegBlob(canvas, options.quality || 68);
+  const jpegBytes = await jpegBlob.arrayBuffer();
+
+  onProgress?.('Generando archivo PDF...');
+  const outPdf = await PDFDocument.create();
+  const embeddedImg = await outPdf.embedJpg(jpegBytes);
+
+  // Standard A4 portrait in points: 595.28 x 841.89
+  const page = outPdf.addPage([595, 842]);
+  page.drawImage(embeddedImg, {
+    x: 0,
+    y: 0,
+    width: 595,
+    height: 842,
+  });
+
+  const finalPdfBytes = await outPdf.save();
+  const finalBlob = new Blob([finalPdfBytes], { type: 'application/pdf' });
+
+  let originalBytes = 0;
+  if (options.frontImage) originalBytes += options.frontImage.size;
+  if (options.backImage) originalBytes += options.backImage.size;
+
+  return {
+    blob: finalBlob,
+    originalSize: originalBytes,
+    newSize: finalBlob.size,
+  };
+}
+
+/**
+ * Process multiple images into a single compiled PDF
  */
 export async function processImagesToPdf(
   items: ImageItem[],
@@ -527,12 +823,10 @@ export async function processImagesToPdf(
     const jpegBytes = await jpegBlob.arrayBuffer();
     const embeddedImg = await outPdf.embedJpg(jpegBytes);
 
-    // Determine PDF page dimensions: Standard A4 (595x842 pt) or Fit to image
     let pageWidth: number;
     let pageHeight: number;
 
     if (options.pageFormat === 'a4') {
-      // Standard A4 portrait (595.28 x 841.89 pt) or landscape if image is wider
       const isLandscape = embeddedImg.width > embeddedImg.height;
       pageWidth = isLandscape ? 842 : 595;
       pageHeight = isLandscape ? 595 : 842;
@@ -541,15 +835,12 @@ export async function processImagesToPdf(
       pageWidth = isLandscape ? 792 : 612;
       pageHeight = isLandscape ? 612 : 792;
     } else {
-      // Fit: natural points (72 DPI)
       pageWidth = (embeddedImg.width * 72) / 96;
       pageHeight = (embeddedImg.height * 72) / 96;
     }
 
     const page = outPdf.addPage([pageWidth, pageHeight]);
-
-    // Fit image inside the page with proper margins
-    const margin = options.pageFormat === 'fit' ? 0 : 20; // 20pt clean margin on standard sheets
+    const margin = options.pageFormat === 'fit' ? 0 : 20;
     const availW = pageWidth - margin * 2;
     const availH = pageHeight - margin * 2;
 
@@ -636,7 +927,6 @@ export async function processFileToScannedPdf(
       });
     }
   } else {
-    // Single image file wrapped as ImageItem
     const item: ImageItem = {
       id: 'single_img',
       file,
