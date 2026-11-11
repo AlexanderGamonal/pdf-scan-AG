@@ -22,9 +22,9 @@ import {
   RotateCw,
   ArrowLeft,
   ArrowRight,
-  Contact,
   ArrowUpDown,
-  CreditCard
+  CreditCard,
+  Focus
 } from 'lucide-react';
 import {
   ScannerOptions,
@@ -46,7 +46,8 @@ import {
 } from './lib/scannerEngine';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'pdf' | 'images' | 'dni'>('dni');
+  // Primary default tab is 'pdf'
+  const [activeTab, setActiveTab] = useState<'pdf' | 'dni' | 'images'>('pdf');
   const [file, setFile] = useState<File | null>(null);
   const [imageItems, setImageItems] = useState<ImageItem[]>([]);
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
@@ -85,6 +86,7 @@ export default function App() {
         qualityPreset: qKey,
         quality: q.quality,
         resolutionScale: q.scale,
+        sharpness: q.sharpness,
       }));
     }
   };
@@ -110,7 +112,7 @@ export default function App() {
     const firstPdf = files.find((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
     const images = files.filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|heic|heif)$/i.test(f.name));
 
-    if (firstPdf && images.length === 0) {
+    if (firstPdf) {
       setActiveTab('pdf');
       setFile(firstPdf);
       setImageItems([]);
@@ -125,7 +127,6 @@ export default function App() {
       }
     } else if (images.length > 0) {
       if (activeTab === 'dni') {
-        // If in DNI mode and 2 images dropped, assign 1st to front and 2nd to back!
         if (images.length >= 2) {
           setDniOptions((prev) => ({
             ...prev,
@@ -220,7 +221,6 @@ export default function App() {
     }
   };
 
-  // Image actions: Rotate 90deg, Delete, Move
   const handleRotateImage = (index: number) => {
     setImageItems((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, rotation: (item.rotation + 90) % 360 } : item))
@@ -258,7 +258,6 @@ export default function App() {
     async function updateDniPreview() {
       if (activeTab !== 'dni') return;
       try {
-        // Render at 0.7 scale for smooth live preview
         const canvas = await renderDniToA4Canvas(dniOptions, 0.7);
         if (isCancelled) return;
         const display = dniCanvasRef.current;
@@ -280,7 +279,7 @@ export default function App() {
     };
   }, [dniOptions, activeTab]);
 
-  // Render preview canvas for PDF & Images
+  // Render preview canvas for PDF & Images with sharpness
   useEffect(() => {
     let isCancelled = false;
 
@@ -302,7 +301,7 @@ export default function App() {
         const item = imageItems[currentPage - 1] || imageItems[0];
         if (item) {
           try {
-            srcCanvas = await renderImageItemToCanvas(item, 1200);
+            srcCanvas = await renderImageItemToCanvas(item, 1400);
             if (isCancelled) return;
           } catch (err) {
             console.error('Error rendering preview image:', err);
@@ -418,10 +417,10 @@ export default function App() {
               <div className="flex items-center space-x-2">
                 <span className="font-bold text-slate-900 text-lg tracking-tight">AG Scan PDF</span>
                 <span className="bg-emerald-50 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-semibold border border-emerald-100">
-                  DNI & Documentos
+                  Alta Nitidez
                 </span>
               </div>
-              <p className="text-xs text-slate-500">Copia DNI en 1 hoja, PDFs y Fotos optimizadas</p>
+              <p className="text-xs text-slate-500">Escáner PDF con nitidez cristalina, bordes reales y copia DNI</p>
             </div>
           </div>
 
@@ -447,6 +446,20 @@ export default function App() {
         {/* Navigation Tabs */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6 pb-2 border-b border-slate-200/80">
           <div className="flex items-center space-x-2 bg-slate-200/70 p-1.5 rounded-2xl">
+            {/* TAB PDF (PRIMARY) */}
+            <button
+              onClick={() => setActiveTab('pdf')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'pdf'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileText className="w-4 h-4 text-indigo-600" />
+              <span>Escanear Documento PDF</span>
+              {file && <span className="w-2 h-2 rounded-full bg-emerald-500 ml-1"></span>}
+            </button>
+
             {/* TAB DNI */}
             <button
               onClick={() => setActiveTab('dni')}
@@ -461,20 +474,6 @@ export default function App() {
               {(dniOptions.frontImage || dniOptions.backImage) && (
                 <span className="w-2 h-2 rounded-full bg-emerald-500 ml-1"></span>
               )}
-            </button>
-
-            {/* TAB PDF */}
-            <button
-              onClick={() => setActiveTab('pdf')}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                activeTab === 'pdf'
-                  ? 'bg-white text-indigo-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              <span>Escanear PDF</span>
-              {file && <span className="w-2 h-2 rounded-full bg-emerald-500 ml-1"></span>}
             </button>
 
             {/* TAB FOTOS */}
@@ -497,20 +496,691 @@ export default function App() {
           </div>
 
           <span className="text-xs text-slate-500 hidden md:inline">
-            {activeTab === 'dni'
-              ? 'Une anverso y reverso de tu DNI en una sola hoja A4 liviana'
-              : activeTab === 'pdf'
-              ? 'Añade inclinación y textura de escáner a PDFs'
+            {activeTab === 'pdf'
+              ? 'Digitaliza PDFs con inclinación, bordes reales y alta nitidez'
+              : activeTab === 'dni'
+              ? 'Une anverso y reverso de DNI en una hoja A4'
               : 'Empaqueta varias imágenes en un PDF ordenado'}
           </span>
         </div>
 
-        {/* -------------------- TAB DNI WORKSPACE -------------------- */}
-        {activeTab === 'dni' ? (
+        {/* -------------------- TAB 1: PDF SCANNER & IMAGES -------------------- */}
+        {activeTab !== 'dni' && (
+          !hasStandardContent ? (
+            /* Upload State */
+            <div className="max-w-3xl mx-auto mt-4">
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
+                className="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-3xl p-12 text-center bg-white shadow-sm hover:shadow-md transition-all cursor-pointer group"
+                onClick={() => document.getElementById('main-file-input')?.click()}
+              >
+                <input
+                  id="main-file-input"
+                  type="file"
+                  multiple={activeTab === 'images'}
+                  accept={activeTab === 'pdf' ? '.pdf' : 'image/*'}
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <div className="w-20 h-20 mx-auto rounded-3xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-5 group-hover:scale-105 group-hover:bg-indigo-100 transition-all">
+                  {activeTab === 'pdf' ? <Upload className="w-10 h-10" /> : <ImageIcon className="w-10 h-10" />}
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">
+                  {activeTab === 'pdf'
+                    ? 'Arrastra tu archivo PDF aquí'
+                    : 'Arrastra tus fotos, capturas o imágenes aquí'}
+                </h3>
+                <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
+                  {activeTab === 'pdf'
+                    ? 'Efecto escáner auténtico: inclinación, bordes reales de papel y letras nítidas.'
+                    : 'Selecciona una o múltiples imágenes para convertirlas en un solo PDF.'}
+                </p>
+                <button
+                  type="button"
+                  className="inline-flex items-center px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-md shadow-indigo-100 transition"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  {activeTab === 'pdf' ? 'Seleccionar archivo PDF' : 'Seleccionar Fotos o Imágenes'}
+                </button>
+              </div>
+
+              {/* Feature Highlights */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-10">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
+                    <Focus className="w-5 h-5" />
+                  </div>
+                  <h4 className="font-bold text-slate-900 text-sm mb-1">Máxima Nitidez</h4>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Filtro unsharp mask y renderizado a alta resolución para que el texto, sellos y firmas no queden borrosos.
+                  </p>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
+                    <Square className="w-5 h-5" />
+                  </div>
+                  <h4 className="font-bold text-slate-900 text-sm mb-1">Bordes Reales al Inclinar</h4>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Contorno físico de papel y sombra natural para que se distinga la hoja al girarse.
+                  </p>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4">
+                    <HardDrive className="w-5 h-5" />
+                  </div>
+                  <h4 className="font-bold text-slate-900 text-sm mb-1">Control de Peso</h4>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Compresión inteligente DCT para que los documentos no se inflen a varios megabytes.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Active PDF / Images Workspace */
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Left Column (5 cols): All Scanner Controls */}
+              <div className="lg:col-span-5 space-y-5">
+                {/* File info card */}
+                {activeTab === 'pdf' && file && (
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex items-center justify-between">
+                    <div className="flex items-center space-x-3 truncate">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div className="truncate">
+                        <h4 className="text-sm font-bold text-slate-900 truncate" title={file.name}>
+                          {file.name}
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          {(file.size / 1024).toFixed(0)} KB • {totalPages} {totalPages === 1 ? 'página' : 'páginas'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setFile(null);
+                        setPdfDoc(null);
+                      }}
+                      className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg font-medium transition"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                )}
+
+                {activeTab === 'images' && (
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <ImageIcon className="w-4 h-4 text-indigo-600" />
+                        <span className="text-xs font-bold text-slate-900">
+                          Fotos ({imageItems.length} {imageItems.length === 1 ? 'pág' : 'págs'})
+                        </span>
+                      </div>
+
+                      <label className="cursor-pointer text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition inline-flex items-center">
+                        <Plus className="w-3.5 h-3.5 mr-1" />
+                        Añadir fotos
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleAddMoreImages}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="flex space-x-2 overflow-x-auto pb-2 pt-1 scrollbar-thin">
+                      {imageItems.map((item, idx) => (
+                        <div
+                          key={item.id}
+                          onClick={() => setCurrentPage(idx + 1)}
+                          className={`shrink-0 w-24 p-1.5 rounded-xl border transition-all cursor-pointer relative group ${
+                            currentPage === idx + 1
+                              ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/20'
+                              : 'border-slate-200 hover:border-slate-300 bg-slate-50'
+                          }`}
+                        >
+                          <div className="w-full h-24 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200/60 relative">
+                            <img
+                              src={item.previewUrl}
+                              alt={item.name}
+                              style={{ transform: `rotate(${item.rotation}deg)` }}
+                              className="max-h-full max-w-full object-contain transition-transform"
+                            />
+                            <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[9px] px-1 rounded font-bold">
+                              #{idx + 1}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between mt-1 px-0.5 text-slate-500">
+                            <button
+                              title="Girar 90°"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRotateImage(idx);
+                              }}
+                              className="p-1 hover:text-indigo-600 hover:bg-slate-200 rounded"
+                            >
+                              <RotateCw className="w-3 h-3" />
+                            </button>
+                            <div className="flex space-x-0.5">
+                              {idx > 0 && (
+                                <button
+                                  title="Mover a la izquierda"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveImage(idx, 'left');
+                                  }}
+                                  className="p-0.5 hover:text-indigo-600"
+                                >
+                                  <ArrowLeft className="w-3 h-3" />
+                                </button>
+                              )}
+                              {idx < imageItems.length - 1 && (
+                                <button
+                                  title="Mover a la derecha"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveImage(idx, 'right');
+                                  }}
+                                  className="p-0.5 hover:text-indigo-600"
+                                >
+                                  <ArrowRight className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                            <button
+                              title="Eliminar"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteImage(idx);
+                              }}
+                              className="p-1 hover:text-rose-600 hover:bg-rose-50 rounded"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-slate-600 font-medium">Formato:</span>
+                        <select
+                          value={options.pageFormat}
+                          onChange={(e) => setOptions({ ...options, pageFormat: e.target.value as PageFormat })}
+                          className="bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-800"
+                        >
+                          <option value="a4">A4 (Estándar)</option>
+                          <option value="letter">Carta (Letter)</option>
+                          <option value="fit">Ajustar a foto</option>
+                        </select>
+                      </div>
+
+                      <label className="flex items-center space-x-1.5 cursor-pointer font-medium text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={options.applyEffectsToImages}
+                          onChange={(e) => setOptions({ ...options, applyEffectsToImages: e.target.checked })}
+                          className="rounded text-indigo-600"
+                        />
+                        <span>Efecto escáner en fotos</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* CONTROL 1: PRESETS RÁPIDOS */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center mb-3">
+                    <Sparkles className="w-4 h-4 mr-2 text-indigo-600" />
+                    Modos Rápidos (Presets)
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {Object.entries(PRESETS).map(([key, preset]) => (
+                      <button
+                        key={key}
+                        onClick={() => handleSelectPreset(key)}
+                        className={`text-left p-2.5 rounded-xl border transition-all ${
+                          selectedPreset === key
+                            ? 'border-indigo-600 bg-indigo-50/70 shadow-2xs ring-1 ring-indigo-500'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="text-base mb-0.5">{preset.icon}</div>
+                        <div className="font-semibold text-xs text-slate-900">{preset.name}</div>
+                        <div className="text-[10px] text-slate-500 line-clamp-2 mt-0.5 leading-tight">
+                          {preset.description}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* CONTROL 2: NITIDEZ Y CONTROL DE PESO */}
+                <div className="bg-white rounded-2xl p-5 border border-indigo-200/80 shadow-xs space-y-4 bg-gradient-to-b from-indigo-50/30 to-white">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center">
+                      <Focus className="w-4 h-4 mr-2 text-indigo-600" />
+                      Nitidez y Control de Peso
+                    </h3>
+                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100/70 px-2 py-0.5 rounded-md">
+                      {QUALITY_PRESETS[options.qualityPreset].sizeEstimate}
+                    </span>
+                  </div>
+
+                  {/* Preset buttons */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {(Object.keys(QUALITY_PRESETS) as QualityPreset[]).map((qKey) => {
+                      const q = QUALITY_PRESETS[qKey];
+                      const isActive = options.qualityPreset === qKey;
+                      return (
+                        <button
+                          key={qKey}
+                          onClick={() => handleQualityPresetChange(qKey)}
+                          className={`p-2.5 rounded-xl border text-left transition-all ${
+                            isActive
+                              ? 'border-indigo-600 bg-indigo-600 text-white shadow-2xs font-semibold'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="text-xs font-bold leading-tight">
+                            {qKey === 'light' ? '⚡ Ligero' : qKey === 'balanced' ? '⚖️ Equilibrado' : '🖨️ Ultra HD'}
+                          </div>
+                          <div className={`text-[10px] mt-0.5 ${isActive ? 'text-indigo-100' : 'text-slate-500'}`}>
+                            {q.sizeEstimate}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Slider de Nitidez (Sharpness) */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-medium text-slate-700 flex items-center">
+                        <Focus className="w-3.5 h-3.5 mr-1 text-indigo-600" />
+                        Filtro de Nitidez (Letras y Firmas)
+                      </span>
+                      <span className="font-semibold text-indigo-600">{options.sharpness.toFixed(2)}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1.0"
+                      max="2.2"
+                      step="0.05"
+                      value={options.sharpness}
+                      onChange={(e) =>
+                        setOptions({
+                          ...options,
+                          sharpness: parseFloat(e.target.value),
+                        })
+                      }
+                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[10px] text-slate-400">
+                      <span>1.0x (Normal)</span>
+                      <span>1.35x (Recomendado)</span>
+                      <span>2.2x (Máximo realce)</span>
+                    </div>
+                  </div>
+
+                  {/* Slider de Calidad JPEG */}
+                  <div className="space-y-1 pt-2 border-t border-slate-100">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-medium text-slate-700">Calidad de Compresión JPEG</span>
+                      <span className="font-semibold text-indigo-600">{options.quality}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="40"
+                      max="92"
+                      step="2"
+                      value={options.quality}
+                      onChange={(e) =>
+                        setOptions({
+                          ...options,
+                          quality: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                {/* CONTROL 3: BORDES AL INCLINAR */}
+                {(activeTab === 'pdf' || options.applyEffectsToImages) && (
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center justify-between">
+                      <span className="flex items-center">
+                        <Square className="w-4 h-4 mr-2 text-slate-700" />
+                        Bordes y Contorno de Inclinación
+                      </span>
+                    </h3>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <button
+                        onClick={() => setOptions({ ...options, borderStyle: 'paper_shadow', scannerBedColor: 'light_gray' })}
+                        className={`p-2.5 rounded-xl border text-left transition ${
+                          options.borderStyle === 'paper_shadow'
+                            ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <div>📄 Hoja + Sombra</div>
+                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">Contorno y sombra física</div>
+                      </button>
+
+                      <button
+                        onClick={() => setOptions({ ...options, borderStyle: 'scanner_bed', scannerBedColor: 'dark_photocopy' })}
+                        className={`p-2.5 rounded-xl border text-left transition ${
+                          options.borderStyle === 'scanner_bed'
+                            ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <div>🖨️ Esquinas de Escáner</div>
+                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">Cristal oscuro en esquinas</div>
+                      </button>
+
+                      <button
+                        onClick={() => setOptions({ ...options, borderStyle: 'thin_line', scannerBedColor: 'white' })}
+                        className={`p-2.5 rounded-xl border text-left transition ${
+                          options.borderStyle === 'thin_line'
+                            ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <div>⚪ Borde Fino</div>
+                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">Línea delgada perimetral</div>
+                      </button>
+
+                      <button
+                        onClick={() => setOptions({ ...options, borderStyle: 'none' })}
+                        className={`p-2.5 rounded-xl border text-left transition ${
+                          options.borderStyle === 'none'
+                            ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <div>🚫 Sin Bordes</div>
+                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">Fondo blanco uniforme</div>
+                      </button>
+                    </div>
+
+                    {options.borderStyle !== 'none' && (
+                      <div className="space-y-1 pt-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="font-medium text-slate-700">Intensidad de Bordes</span>
+                          <span className="text-slate-500">{options.borderIntensity}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="20"
+                          max="100"
+                          step="5"
+                          value={options.borderIntensity}
+                          onChange={(e) => setOptions({ ...options, borderIntensity: parseInt(e.target.value) })}
+                          className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                        />
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                      <div className="flex items-center justify-between text-xs">
+                        <label className="font-medium text-slate-700 flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={options.askew}
+                            onChange={(e) => setOptions({ ...options, askew: e.target.checked })}
+                            className="rounded text-indigo-600 mr-2"
+                          />
+                          Inclinación aleatoria (Askew)
+                        </label>
+                        <span className="text-slate-500">±{options.askewAngle}°</span>
+                      </div>
+                      {options.askew && (
+                        <input
+                          type="range"
+                          min="0.2"
+                          max="2.5"
+                          step="0.1"
+                          value={options.askewAngle}
+                          onChange={(e) => setOptions({ ...options, askewAngle: parseFloat(e.target.value) })}
+                          className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* CONTROL 4: EFECTOS ÓPTICOS DETALLADOS */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-3">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center justify-between">
+                    <span className="flex items-center">
+                      <Sliders className="w-4 h-4 mr-2 text-slate-700" />
+                      Efectos Ópticos
+                    </span>
+                    <button
+                      onClick={() => handleSelectPreset('office')}
+                      className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center"
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" />
+                      Restablecer
+                    </button>
+                  </h3>
+
+                  {/* Photocopy Black and White */}
+                  <div className="pt-2 border-t border-slate-100">
+                    <label className="flex items-center justify-between text-xs font-medium text-slate-700 cursor-pointer">
+                      <span className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={options.blackAndWhite}
+                          onChange={(e) => setOptions({ ...options, blackAndWhite: e.target.checked })}
+                          className="rounded text-indigo-600 mr-2"
+                        />
+                        Modo Fotocopia Blanco y Negro
+                      </span>
+                      <span className="text-[11px] text-slate-400">Tóner contrastado</span>
+                    </label>
+                  </div>
+
+                  {/* Blur */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                    <div className="flex items-center justify-between text-xs">
+                      <label className="font-medium text-slate-700 flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={options.blur}
+                          onChange={(e) => setOptions({ ...options, blur: e.target.checked })}
+                          className="rounded text-indigo-600 mr-2"
+                        />
+                        Desenfoque de lente
+                      </label>
+                      <span className="text-slate-500">{options.blurRadius}px</span>
+                    </div>
+                    {options.blur && (
+                      <input
+                        type="range"
+                        min="0.3"
+                        max="2.0"
+                        step="0.1"
+                        value={options.blurRadius}
+                        onChange={(e) => setOptions({ ...options, blurRadius: parseFloat(e.target.value) })}
+                        className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                      />
+                    )}
+                  </div>
+
+                  {/* Tapa abierta / Blur variation */}
+                  <div className="pt-2 border-t border-slate-100">
+                    <label className="flex items-center justify-between text-xs font-medium text-slate-700 cursor-pointer">
+                      <span className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={options.blurVariation}
+                          onChange={(e) => setOptions({ ...options, blurVariation: e.target.checked })}
+                          className="rounded text-indigo-600 mr-2"
+                        />
+                        Tapa abierta / Enfoque desigual
+                      </span>
+                      <span className="text-[11px] text-slate-400">Gradiente óptico</span>
+                    </label>
+                  </div>
+
+                  {/* Contrast */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-700">Contraste</span>
+                      <span className="text-slate-500">{options.contrast.toFixed(2)}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.8"
+                      max="1.5"
+                      step="0.05"
+                      value={options.contrast}
+                      onChange={(e) => setOptions({ ...options, contrast: parseFloat(e.target.value) })}
+                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                    />
+                  </div>
+
+                  {/* Grano de Papel */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-700">Grano de Papel (Optimizado)</span>
+                      <span className="text-slate-500">{options.noise}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="25"
+                      step="1"
+                      value={options.noise}
+                      onChange={(e) => setOptions({ ...options, noise: parseInt(e.target.value) })}
+                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                {/* BOTÓN DE DESCARGA */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
+                  {isProcessing ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-slate-700 text-center">{progressMsg || 'Procesando en alta nitidez...'}</p>
+                      <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                        <div className="bg-indigo-600 h-full w-2/3 animate-pulse rounded-full" />
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleProcessAndDownload}
+                      className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md shadow-indigo-100 flex items-center justify-center space-x-2 transition cursor-pointer"
+                    >
+                      <Download className="w-5 h-5" />
+                      <span>
+                        Descargar PDF {activeTab === 'images' ? 'desde Fotos' : 'Escaneado'} ({totalPages}{' '}
+                        {totalPages === 1 ? 'pág' : 'págs'})
+                      </span>
+                    </button>
+                  )}
+
+                  {successInfo && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center space-x-3 text-xs text-emerald-800">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                      <div>
+                        <p className="font-semibold">¡PDF generado con éxito!</p>
+                        <p className="text-emerald-700 mt-0.5">
+                          Original: {successInfo.originalSize} &rarr; Escaneado: <strong>{successInfo.newSize}</strong> ({successInfo.reduction})
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column (7 cols): Live Interactive Preview */}
+              <div className="lg:col-span-7 bg-white rounded-3xl p-6 border border-slate-200 shadow-2xs space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                  <div className="flex items-center space-x-2">
+                    <Eye className="w-4 h-4 text-indigo-600" />
+                    <span className="font-bold text-slate-900 text-sm">
+                      Vista Previa {activeTab === 'images' ? `(Foto #${currentPage})` : `(Página #${currentPage})`}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                    <button
+                      onClick={() => setPreviewMode('scanned')}
+                      className={`px-3 py-1 rounded-lg transition ${
+                        previewMode === 'scanned'
+                          ? 'bg-white text-indigo-700 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Escaneado
+                    </button>
+                    <button
+                      onClick={() => setPreviewMode('original')}
+                      className={`px-3 py-1 rounded-lg transition ${
+                        previewMode === 'original'
+                          ? 'bg-white text-indigo-700 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Original
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-slate-200/60 rounded-2xl p-6 flex items-center justify-center min-h-[480px] overflow-hidden border border-slate-300/40">
+                  <canvas
+                    ref={previewCanvasRef}
+                    className="max-h-[580px] w-auto max-w-full shadow-xl rounded-xs bg-white"
+                  />
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-2">
+                    <button
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      className="inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" />
+                      Anterior
+                    </button>
+
+                    <span className="text-xs font-semibold text-slate-600">
+                      Página {currentPage} de {totalPages}
+                    </span>
+
+                    <button
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      className="inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      Siguiente
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        )}
+
+        {/* -------------------- TAB 2: DNI WORKSPACE -------------------- */}
+        {activeTab === 'dni' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Left Column: Upload Cards & Options (5 cols) */}
             <div className="lg:col-span-5 space-y-5">
-              {/* DNI Upload Boxes (Front & Back) */}
               <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-2xs space-y-4">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                   <h3 className="text-sm font-bold text-slate-900 flex items-center">
@@ -681,14 +1351,13 @@ export default function App() {
                 </div>
               </div>
 
-              {/* DNI Format & Layout Options */}
+              {/* DNI Format Options */}
               <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-2xs space-y-4">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center">
                   <Sliders className="w-4 h-4 mr-2 text-slate-700" />
                   Ajustes de la Hoja A4
                 </h3>
 
-                {/* Color Mode */}
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-slate-700">Modo de Color</span>
                   <div className="grid grid-cols-3 gap-2 text-xs">
@@ -725,7 +1394,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Card Scale / Size Slider */}
                 <div className="space-y-1.5 pt-2 border-t border-slate-100">
                   <div className="flex justify-between text-xs">
                     <span className="font-medium text-slate-700">Tamaño del DNI en la hoja</span>
@@ -745,13 +1413,8 @@ export default function App() {
                     }
                     className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
                   />
-                  <div className="flex justify-between text-[10px] text-slate-400">
-                    <span>Tamaño estándar</span>
-                    <span>Ampliado (Recomendado)</span>
-                  </div>
                 </div>
 
-                {/* Vertical Gap Slider */}
                 <div className="space-y-1.5 pt-2 border-t border-slate-100">
                   <div className="flex justify-between text-xs">
                     <span className="font-medium text-slate-700">Separación entre caras</span>
@@ -772,24 +1435,6 @@ export default function App() {
                     className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
                   />
                 </div>
-
-                {/* Texture checkbox */}
-                <div className="pt-2 border-t border-slate-100">
-                  <label className="flex items-center justify-between text-xs font-medium text-slate-700 cursor-pointer">
-                    <span className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={dniOptions.applyScannerEffect}
-                        onChange={(e) =>
-                          setDniOptions({ ...dniOptions, applyScannerEffect: e.target.checked })
-                        }
-                        className="rounded text-indigo-600 mr-2"
-                      />
-                      Efecto de escáner sutil
-                    </span>
-                    <span className="text-[11px] text-slate-400">Micro-textura natural</span>
-                  </label>
-                </div>
               </div>
 
               {/* DNI Process Button */}
@@ -797,7 +1442,7 @@ export default function App() {
                 <div className="flex items-center justify-between text-xs text-slate-500 pb-1">
                   <span>Peso estimado:</span>
                   <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                    ~100 - 180 KB (1 Hoja A4)
+                    ~120 - 220 KB (1 Hoja A4 Nítida)
                   </span>
                 </div>
 
@@ -835,7 +1480,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Column: Live DNI A4 Preview (7 cols) */}
+            {/* Right Column: Live DNI A4 Preview */}
             <div className="lg:col-span-7 bg-white rounded-3xl p-6 border border-slate-200 shadow-2xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center space-x-2">
@@ -849,7 +1494,6 @@ export default function App() {
                 </span>
               </div>
 
-              {/* Canvas A4 Container */}
               <div className="bg-slate-200/70 rounded-2xl p-6 flex items-center justify-center min-h-[520px] overflow-hidden border border-slate-300/40">
                 <canvas
                   ref={dniCanvasRef}
@@ -862,432 +1506,6 @@ export default function App() {
               </p>
             </div>
           </div>
-        ) : (
-          /* -------------------- TAB PDF & IMAGES WORKSPACE -------------------- */
-          !hasStandardContent ? (
-            /* Empty / Upload State for PDF & Images */
-            <div className="max-w-3xl mx-auto mt-4">
-              <div
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={handleDrop}
-                className="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-3xl p-12 text-center bg-white shadow-sm hover:shadow-md transition-all cursor-pointer group"
-                onClick={() => document.getElementById('main-file-input')?.click()}
-              >
-                <input
-                  id="main-file-input"
-                  type="file"
-                  multiple
-                  accept=".pdf,image/png,image/jpeg,image/webp,image/bmp"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-                <div className="w-20 h-20 mx-auto rounded-3xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-5 group-hover:scale-105 group-hover:bg-indigo-100 transition-all">
-                  {activeTab === 'pdf' ? <Upload className="w-10 h-10" /> : <ImageIcon className="w-10 h-10" />}
-                </div>
-                <h3 className="text-xl font-bold text-slate-800 mb-2">
-                  {activeTab === 'pdf'
-                    ? 'Arrastra tu PDF aquí'
-                    : 'Arrastra tus fotos, capturas o imágenes aquí'}
-                </h3>
-                <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
-                  {activeTab === 'pdf'
-                    ? 'Añade inclinación, bordes reales de hoja y optimización de peso.'
-                    : 'Puedes seleccionar una o múltiples imágenes (JPG, PNG, WebP) para unirlas en un solo PDF.'}
-                </p>
-                <button
-                  type="button"
-                  className="inline-flex items-center px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-md shadow-indigo-100 transition"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  {activeTab === 'pdf' ? 'Seleccionar archivo PDF' : 'Seleccionar Fotos o Imágenes (1 o varias)'}
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* Active PDF / Images Workspace */
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              {/* Left Column (5 cols) */}
-              <div className="lg:col-span-5 space-y-5">
-                {activeTab === 'pdf' && file && (
-                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex items-center justify-between">
-                    <div className="flex items-center space-x-3 truncate">
-                      <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                        <FileText className="w-5 h-5" />
-                      </div>
-                      <div className="truncate">
-                        <h4 className="text-sm font-bold text-slate-900 truncate" title={file.name}>
-                          {file.name}
-                        </h4>
-                        <p className="text-xs text-slate-500">
-                          {(file.size / 1024).toFixed(0)} KB • {totalPages} {totalPages === 1 ? 'página' : 'páginas'}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setFile(null);
-                        setPdfDoc(null);
-                      }}
-                      className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg font-medium transition"
-                    >
-                      Cambiar
-                    </button>
-                  </div>
-                )}
-
-                {activeTab === 'images' && (
-                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <ImageIcon className="w-4 h-4 text-indigo-600" />
-                        <span className="text-xs font-bold text-slate-900">
-                          Fotos seleccionadas ({imageItems.length} {imageItems.length === 1 ? 'página' : 'páginas'})
-                        </span>
-                      </div>
-
-                      <label className="cursor-pointer text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition inline-flex items-center">
-                        <Plus className="w-3.5 h-3.5 mr-1" />
-                        Añadir más fotos
-                        <input
-                          type="file"
-                          multiple
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleAddMoreImages}
-                        />
-                      </label>
-                    </div>
-
-                    <div className="flex space-x-2 overflow-x-auto pb-2 pt-1 scrollbar-thin">
-                      {imageItems.map((item, idx) => (
-                        <div
-                          key={item.id}
-                          onClick={() => setCurrentPage(idx + 1)}
-                          className={`shrink-0 w-24 p-1.5 rounded-xl border transition-all cursor-pointer relative group ${
-                            currentPage === idx + 1
-                              ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/20'
-                              : 'border-slate-200 hover:border-slate-300 bg-slate-50'
-                          }`}
-                        >
-                          <div className="w-full h-24 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200/60 relative">
-                            <img
-                              src={item.previewUrl}
-                              alt={item.name}
-                              style={{ transform: `rotate(${item.rotation}deg)` }}
-                              className="max-h-full max-w-full object-contain transition-transform"
-                            />
-                            <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[9px] px-1 rounded font-bold">
-                              #{idx + 1}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-between mt-1 px-0.5 text-slate-500">
-                            <button
-                              title="Girar 90°"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRotateImage(idx);
-                              }}
-                              className="p-1 hover:text-indigo-600 hover:bg-slate-200 rounded"
-                            >
-                              <RotateCw className="w-3 h-3" />
-                            </button>
-                            <div className="flex space-x-0.5">
-                              {idx > 0 && (
-                                <button
-                                  title="Mover a la izquierda"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleMoveImage(idx, 'left');
-                                  }}
-                                  className="p-0.5 hover:text-indigo-600"
-                                >
-                                  <ArrowLeft className="w-3 h-3" />
-                                </button>
-                              )}
-                              {idx < imageItems.length - 1 && (
-                                <button
-                                  title="Mover a la derecha"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleMoveImage(idx, 'right');
-                                  }}
-                                  className="p-0.5 hover:text-indigo-600"
-                                >
-                                  <ArrowRight className="w-3 h-3" />
-                                </button>
-                              )}
-                            </div>
-                            <button
-                              title="Eliminar"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteImage(idx);
-                              }}
-                              className="p-1 hover:text-rose-600 hover:bg-rose-50 rounded"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-slate-600 font-medium">Formato de hoja:</span>
-                        <select
-                          value={options.pageFormat}
-                          onChange={(e) => setOptions({ ...options, pageFormat: e.target.value as PageFormat })}
-                          className="bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-800"
-                        >
-                          <option value="a4">A4 (Estándar de oficina)</option>
-                          <option value="letter">Carta (Letter)</option>
-                          <option value="fit">Ajustar al tamaño de la foto</option>
-                        </select>
-                      </div>
-
-                      <label className="flex items-center space-x-1.5 cursor-pointer font-medium text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={options.applyEffectsToImages}
-                          onChange={(e) => setOptions({ ...options, applyEffectsToImages: e.target.checked })}
-                          className="rounded text-indigo-600"
-                        />
-                        <span>Aplicar efecto escáner a fotos</span>
-                      </label>
-                    </div>
-                  </div>
-                )}
-
-                {/* Optimización de Peso */}
-                <div className="bg-white rounded-2xl p-5 border border-indigo-200/80 shadow-xs space-y-3 bg-gradient-to-b from-indigo-50/30 to-white">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-slate-900 flex items-center">
-                      <HardDrive className="w-4 h-4 mr-2 text-indigo-600" />
-                      Optimización de Peso (PDF Liviano)
-                    </h3>
-                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100/70 px-2 py-0.5 rounded-md">
-                      {QUALITY_PRESETS[options.qualityPreset].sizeEstimate}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    {(Object.keys(QUALITY_PRESETS) as QualityPreset[]).map((qKey) => {
-                      const q = QUALITY_PRESETS[qKey];
-                      const isActive = options.qualityPreset === qKey;
-                      return (
-                        <button
-                          key={qKey}
-                          onClick={() => handleQualityPresetChange(qKey)}
-                          className={`p-2.5 rounded-xl border text-left transition-all ${
-                            isActive
-                              ? 'border-indigo-600 bg-indigo-600 text-white shadow-2xs font-semibold'
-                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                          }`}
-                        >
-                          <div className="text-xs font-bold leading-tight">
-                            {qKey === 'light' ? '⚡ Ligero' : qKey === 'balanced' ? '⚖️ Equilibrado' : '🖨️ HD'}
-                          </div>
-                          <div className={`text-[10px] mt-0.5 ${isActive ? 'text-indigo-100' : 'text-slate-500'}`}>
-                            {q.sizeEstimate}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-100 space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="font-medium text-slate-700">Calidad de Compresión JPEG</span>
-                      <span className="font-semibold text-indigo-600">{options.quality}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="35"
-                      max="90"
-                      step="5"
-                      value={options.quality}
-                      onChange={(e) =>
-                        setOptions({
-                          ...options,
-                          quality: parseInt(e.target.value),
-                        })
-                      }
-                      className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                    />
-                  </div>
-                </div>
-
-                {/* Bordes al inclinar */}
-                {(activeTab === 'pdf' || options.applyEffectsToImages) && (
-                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
-                    <h3 className="text-sm font-bold text-slate-900 flex items-center justify-between">
-                      <span className="flex items-center">
-                        <Square className="w-4 h-4 mr-2 text-slate-700" />
-                        Bordes y Contorno de Inclinación
-                      </span>
-                    </h3>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <button
-                        onClick={() => setOptions({ ...options, borderStyle: 'paper_shadow', scannerBedColor: 'light_gray' })}
-                        className={`p-2.5 rounded-xl border text-left transition ${
-                          options.borderStyle === 'paper_shadow'
-                            ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                        }`}
-                      >
-                        <div>📄 Hoja + Sombra</div>
-                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">Contorno y sombra física</div>
-                      </button>
-
-                      <button
-                        onClick={() => setOptions({ ...options, borderStyle: 'scanner_bed', scannerBedColor: 'dark_photocopy' })}
-                        className={`p-2.5 rounded-xl border text-left transition ${
-                          options.borderStyle === 'scanner_bed'
-                            ? 'border-indigo-600 bg-indigo-50 font-bold text-indigo-900 ring-1 ring-indigo-500'
-                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                        }`}
-                      >
-                        <div>🖨️ Esquinas de Escáner</div>
-                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">Cristal oscuro en esquinas</div>
-                      </button>
-                    </div>
-
-                    <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                      <div className="flex items-center justify-between text-xs">
-                        <label className="font-medium text-slate-700 flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={options.askew}
-                            onChange={(e) => setOptions({ ...options, askew: e.target.checked })}
-                            className="rounded text-indigo-600 mr-2"
-                          />
-                          Inclinación aleatoria (Askew)
-                        </label>
-                        <span className="text-slate-500">±{options.askewAngle}°</span>
-                      </div>
-                      {options.askew && (
-                        <input
-                          type="range"
-                          min="0.2"
-                          max="2.5"
-                          step="0.1"
-                          value={options.askewAngle}
-                          onChange={(e) => setOptions({ ...options, askewAngle: parseFloat(e.target.value) })}
-                          className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                        />
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Process Button */}
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
-                  {isProcessing ? (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-slate-700 text-center">{progressMsg || 'Procesando...'}</p>
-                      <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                        <div className="bg-indigo-600 h-full w-2/3 animate-pulse rounded-full" />
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={handleProcessAndDownload}
-                      className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md shadow-indigo-100 flex items-center justify-center space-x-2 transition cursor-pointer"
-                    >
-                      <Download className="w-5 h-5" />
-                      <span>
-                        Descargar PDF {activeTab === 'images' ? 'desde Fotos' : 'Escaneado'} ({totalPages}{' '}
-                        {totalPages === 1 ? 'pág' : 'págs'})
-                      </span>
-                    </button>
-                  )}
-
-                  {successInfo && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center space-x-3 text-xs text-emerald-800">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                      <div>
-                        <p className="font-semibold">¡PDF generado con éxito!</p>
-                        <p className="text-emerald-700 mt-0.5">
-                          Original: {successInfo.originalSize} &rarr; Escaneado: <strong>{successInfo.newSize}</strong> ({successInfo.reduction})
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Right Column (7 cols) */}
-              <div className="lg:col-span-7 bg-white rounded-3xl p-6 border border-slate-200 shadow-2xs space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                  <div className="flex items-center space-x-2">
-                    <Eye className="w-4 h-4 text-indigo-600" />
-                    <span className="font-bold text-slate-900 text-sm">
-                      Vista Previa {activeTab === 'images' ? `(Foto #${currentPage})` : `(Página #${currentPage})`}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
-                    <button
-                      onClick={() => setPreviewMode('scanned')}
-                      className={`px-3 py-1 rounded-lg transition ${
-                        previewMode === 'scanned'
-                          ? 'bg-white text-indigo-700 shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Resultado
-                    </button>
-                    <button
-                      onClick={() => setPreviewMode('original')}
-                      className={`px-3 py-1 rounded-lg transition ${
-                        previewMode === 'original'
-                          ? 'bg-white text-indigo-700 shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Original
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-slate-200/60 rounded-2xl p-6 flex items-center justify-center min-h-[480px] overflow-hidden border border-slate-300/40">
-                  <canvas
-                    ref={previewCanvasRef}
-                    className="max-h-[580px] w-auto max-w-full shadow-xl rounded-xs bg-white"
-                  />
-                </div>
-
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-between pt-2">
-                    <button
-                      disabled={currentPage <= 1}
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                      className="inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                    >
-                      <ChevronLeft className="w-4 h-4 mr-1" />
-                      Anterior
-                    </button>
-
-                    <span className="text-xs font-semibold text-slate-600">
-                      Página {currentPage} de {totalPages}
-                    </span>
-
-                    <button
-                      disabled={currentPage >= totalPages}
-                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                      className="inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                    >
-                      Siguiente
-                      <ChevronRight className="w-4 h-4 ml-1" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )
         )}
       </main>
 

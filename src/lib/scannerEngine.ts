@@ -24,11 +24,12 @@ export interface DniOptions {
   backImage: File | null;
   backRotation: number;
   backPreviewUrl: string | null;
-  cardScale: number; // 0.60 to 0.90 (default 0.76)
+  cardScale: number; // 0.65 to 0.90 (default 0.78)
   verticalGap: number; // 20 to 80 (default 45)
   colorMode: 'color' | 'bw' | 'grayscale'; // default 'color'
   applyScannerEffect: boolean;
-  quality: number; // default 68 (produces ~90-180 KB)
+  sharpness: number; // default 1.3
+  quality: number; // default 74
 }
 
 export const DEFAULT_DNI_OPTIONS: DniOptions = {
@@ -42,13 +43,15 @@ export const DEFAULT_DNI_OPTIONS: DniOptions = {
   verticalGap: 45,
   colorMode: 'color',
   applyScannerEffect: true,
-  quality: 68,
+  sharpness: 1.3,
+  quality: 74,
 };
 
 export interface ScannerOptions {
-  quality: number; // 30 to 95 (default 68)
+  quality: number; // 35 to 95 (default 74)
   qualityPreset: QualityPreset;
-  resolutionScale: number; // 1.15 to 2.0 (default 1.35)
+  resolutionScale: number; // default 1.65 for razor sharp text
+  sharpness: number; // 1.0 to 2.5 (default 1.35)
   askew: boolean; // default true
   askewAngle: number; // max angle in degrees (default 0.75)
   borderStyle: BorderStyle; // 'paper_shadow' | 'scanner_bed' | 'thin_line' | 'none'
@@ -58,19 +61,20 @@ export interface ScannerOptions {
   blur: boolean; // default false
   blurRadius: number; // default 0.8
   blurVariation: boolean; // depth of field uneven focus (default false)
-  noise: number; // 0 to 50 (default 6)
-  contrast: number; // 0.5 to 2.0 (default 1.05)
+  noise: number; // 0 to 50 (default 5)
+  contrast: number; // 0.5 to 2.0 (default 1.08)
   brightness: number; // 0.5 to 1.5 (default 1.01)
   applyEffectsToImages: boolean; // default true
   pageFormat: PageFormat; // default 'a4'
 }
 
 export const DEFAULT_OPTIONS: ScannerOptions = {
-  quality: 68,
+  quality: 74,
   qualityPreset: 'balanced',
-  resolutionScale: 1.35,
+  resolutionScale: 1.65,
+  sharpness: 1.35,
   askew: true,
-  askewAngle: 0.8,
+  askewAngle: 0.75,
   borderStyle: 'paper_shadow',
   borderIntensity: 70,
   scannerBedColor: 'light_gray',
@@ -78,8 +82,8 @@ export const DEFAULT_OPTIONS: ScannerOptions = {
   blur: false,
   blurRadius: 0.8,
   blurVariation: false,
-  noise: 6,
-  contrast: 1.05,
+  noise: 5,
+  contrast: 1.08,
   brightness: 1.01,
   applyEffectsToImages: true,
   pageFormat: 'a4',
@@ -87,28 +91,31 @@ export const DEFAULT_OPTIONS: ScannerOptions = {
 
 export const QUALITY_PRESETS: Record<
   QualityPreset,
-  { name: string; desc: string; sizeEstimate: string; scale: number; quality: number }
+  { name: string; desc: string; sizeEstimate: string; scale: number; quality: number; sharpness: number }
 > = {
   light: {
     name: 'Ligero (Ideal Correo / Web)',
-    desc: 'Archivos muy livianos (~50-100 KB/pág). Excelente para enviar por email o subir a plataformas con límites estrictos.',
-    sizeEstimate: '~50 - 100 KB / pág',
-    scale: 1.15,
-    quality: 55,
+    desc: 'Archivos muy livianos (~80-140 KB/pág). Excelente para enviar por email con límites estrictos de peso.',
+    sizeEstimate: '~80 - 140 KB / pág',
+    scale: 1.4,
+    quality: 62,
+    sharpness: 1.4,
   },
   balanced: {
-    name: 'Equilibrado (Recomendado)',
-    desc: 'El balance perfecto (~120-220 KB/pág). Textos y firmas completamente nítidos con compresión óptima de escáner real.',
-    sizeEstimate: '~120 - 220 KB / pág',
-    scale: 1.35,
-    quality: 68,
+    name: 'Equilibrado (Alta Nitidez)',
+    desc: 'El balance ideal (~180-280 KB/pág). Textos, firmas y sellos completamente definidos y nítidos.',
+    sizeEstimate: '~180 - 280 KB / pág',
+    scale: 1.65,
+    quality: 74,
+    sharpness: 1.35,
   },
   high: {
-    name: 'Alta Definición (HD)',
-    desc: 'Mayor resolución (~350-600 KB/pág). Para documentos con letras muy pequeñas o sellos de detalle.',
-    sizeEstimate: '~350 - 600 KB / pág',
-    scale: 1.8,
-    quality: 80,
+    name: 'Máxima Definición (Ultra HD)',
+    desc: 'Máxima resolución (~380-650 KB/pág). Para documentos con letras muy pequeñas o sellos de gran detalle.',
+    sizeEstimate: '~380 - 650 KB / pág',
+    scale: 2.0,
+    quality: 84,
+    sharpness: 1.45,
   },
 };
 
@@ -119,11 +126,12 @@ export const PRESETS: Record<
   office: {
     name: 'Escáner de Oficina (Color)',
     icon: '🏢',
-    description: 'Bordes de hoja física con sombra, ligera inclinación y peso optimizado.',
+    description: 'Bordes de hoja física con sombra, ligera inclinación, alta nitidez y peso optimizado.',
     options: {
-      quality: 68,
+      quality: 74,
       qualityPreset: 'balanced',
-      resolutionScale: 1.35,
+      resolutionScale: 1.65,
+      sharpness: 1.35,
       askew: true,
       askewAngle: 0.75,
       borderStyle: 'paper_shadow',
@@ -132,8 +140,8 @@ export const PRESETS: Record<
       blackAndWhite: false,
       blur: false,
       blurVariation: false,
-      noise: 6,
-      contrast: 1.06,
+      noise: 5,
+      contrast: 1.08,
       brightness: 1.01,
       applyEffectsToImages: true,
     },
@@ -141,21 +149,21 @@ export const PRESETS: Record<
   photocopy: {
     name: 'Fotocopia Blanco y Negro',
     icon: '📄',
-    description: 'Bordes oscuros de cristal de fotocopiadora, alto contraste y grano de tóner.',
+    description: 'Bordes oscuros de fotocopiadora, alto contraste y letras súper marcadas.',
     options: {
-      quality: 65,
+      quality: 72,
       qualityPreset: 'balanced',
-      resolutionScale: 1.35,
+      resolutionScale: 1.65,
+      sharpness: 1.45,
       askew: true,
-      askewAngle: 0.9,
+      askewAngle: 0.85,
       borderStyle: 'scanner_bed',
       borderIntensity: 85,
       scannerBedColor: 'dark_photocopy',
       blackAndWhite: true,
-      blur: true,
-      blurRadius: 0.7,
+      blur: false,
       blurVariation: false,
-      noise: 10,
+      noise: 8,
       contrast: 1.35,
       brightness: 1.02,
       applyEffectsToImages: true,
@@ -164,11 +172,12 @@ export const PRESETS: Record<
   vintage: {
     name: 'Escáner Antiguo con Marco',
     icon: '📜',
-    description: 'Inclinación marcada, bordes oscuros en esquinas y grano pronunciado.',
+    description: 'Inclinación marcada, esquinas oscuras de cristal y grano pronunciado.',
     options: {
-      quality: 60,
+      quality: 68,
       qualityPreset: 'balanced',
-      resolutionScale: 1.35,
+      resolutionScale: 1.5,
+      sharpness: 1.25,
       askew: true,
       askewAngle: 1.3,
       borderStyle: 'scanner_bed',
@@ -176,7 +185,7 @@ export const PRESETS: Record<
       scannerBedColor: 'dark_photocopy',
       blackAndWhite: false,
       blur: true,
-      blurRadius: 1.0,
+      blurRadius: 0.7,
       blurVariation: true,
       noise: 14,
       contrast: 1.15,
@@ -185,34 +194,36 @@ export const PRESETS: Record<
     },
   },
   clean_image: {
-    name: 'Foto Limpia a PDF',
-    icon: '📸',
-    description: 'Convierte imágenes a PDF nítido y liviano sin inclinar ni añadir ruido.',
+    name: 'Documento Limpio / HD',
+    icon: '⚡',
+    description: 'Sin inclinación ni ruido. Máxima nitidez en textos y firmas.',
     options: {
-      quality: 75,
+      quality: 80,
       qualityPreset: 'balanced',
-      resolutionScale: 1.3,
+      resolutionScale: 1.75,
+      sharpness: 1.4,
       askew: false,
       borderStyle: 'none',
       blackAndWhite: false,
       blur: false,
       blurVariation: false,
       noise: 0,
-      contrast: 1.0,
+      contrast: 1.04,
       brightness: 1.0,
       applyEffectsToImages: false,
     },
   },
   subtle: {
-    name: 'Escáner Limpio / Sutil',
-    icon: '⚡',
-    description: 'Borde fino y discreto, inclinación mínima y archivo ultra optimizado.',
+    name: 'Escáner Sutil',
+    icon: '✨',
+    description: 'Borde fino y discreto, inclinación mínima y archivo equilibrado.',
     options: {
-      quality: 70,
+      quality: 75,
       qualityPreset: 'balanced',
-      resolutionScale: 1.3,
+      resolutionScale: 1.6,
+      sharpness: 1.3,
       askew: true,
-      askewAngle: 0.4,
+      askewAngle: 0.35,
       borderStyle: 'thin_line',
       borderIntensity: 50,
       scannerBedColor: 'white',
@@ -220,7 +231,7 @@ export const PRESETS: Record<
       blur: false,
       blurVariation: false,
       noise: 3,
-      contrast: 1.02,
+      contrast: 1.05,
       brightness: 1.0,
       applyEffectsToImages: true,
     },
@@ -228,7 +239,37 @@ export const PRESETS: Record<
 };
 
 /**
- * Apply scanner effects on a canvas and return a new canvas with realistic borders & optimized weight
+ * Apply 3x3 unsharp mask / Laplacian edge sharpening directly on canvas pixels
+ */
+export function applySharpnessFilter(ctx: CanvasRenderingContext2D, width: number, height: number, factor: number) {
+  if (factor <= 1.01) return;
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const src = new Uint8ClampedArray(imgData.data);
+  const dst = imgData.data;
+  const strength = Math.min(1.5, (factor - 1.0) * 0.85);
+
+  for (let y = 1; y < height - 1; y++) {
+    const yOffset = y * width;
+    for (let x = 1; x < width - 1; x++) {
+      const idx = (yOffset + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const val = src[idx + c];
+        const top = src[((y - 1) * width + x) * 4 + c];
+        const bottom = src[((y + 1) * width + x) * 4 + c];
+        const left = src[(yOffset + (x - 1)) * 4 + c];
+        const right = src[(yOffset + (x + 1)) * 4 + c];
+
+        // Laplacian high-pass edge crisping
+        const sharpVal = val * (1 + 4 * strength) - (top + bottom + left + right) * strength;
+        dst[idx + c] = sharpVal < 0 ? 0 : sharpVal > 255 ? 255 : sharpVal;
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+/**
+ * Apply scanner effects on a canvas and return a new canvas with realistic borders & high sharpness
  */
 export function applyScannerEffects(
   srcCanvas: HTMLCanvasElement,
@@ -246,7 +287,7 @@ export function applyScannerEffects(
 
   let angle = 0;
   if (options.askew) {
-    const maxA = options.askewAngle || 0.8;
+    const maxA = options.askewAngle || 0.75;
     const sign = rand() > 0.5 ? 1 : -1;
     const mag = 0.35 * maxA + rand() * (0.65 * maxA);
     angle = sign * mag;
@@ -331,6 +372,7 @@ export function applyScannerEffects(
 
   ctx.restore();
 
+  // 1. Pixel adjustments: Contrast, Brightness, B&W, Smooth Grain
   const imgData = ctx.getImageData(0, 0, rotWidth, rotHeight);
   const data = imgData.data;
 
@@ -341,7 +383,7 @@ export function applyScannerEffects(
   const cVal = (contrastFactor - 1.0) * 128;
   const cFactor = (259 * (cVal + 255)) / (255 * (259 - cVal));
 
-  const noiseAmp = options.noise * 0.65;
+  const noiseAmp = options.noise * 0.6;
 
   for (let i = 0; i < data.length; i += 4) {
     let r = data[i];
@@ -382,6 +424,12 @@ export function applyScannerEffects(
 
   ctx.putImageData(imgData, 0, 0);
 
+  // 2. Apply Sharpness Edge Filter for crisp text!
+  if (options.sharpness && options.sharpness > 1.0) {
+    applySharpnessFilter(ctx, rotWidth, rotHeight, options.sharpness);
+  }
+
+  // 3. Uneven focus lid if enabled
   if (options.blurVariation) {
     const blurredCanvas = document.createElement('canvas');
     blurredCanvas.width = rotWidth;
@@ -415,12 +463,12 @@ export function applyScannerEffects(
 }
 
 /**
- * Render a single PDF page into an HTMLCanvasElement
+ * Render a single PDF page into an HTMLCanvasElement with high sharpness resolution
  */
 export async function renderPdfPageToCanvas(
   pdfDoc: pdfjsLib.PDFDocumentProxy,
   pageNumber: number,
-  scale: number = 1.35
+  scale: number = 1.65
 ): Promise<{ canvas: HTMLCanvasElement; originalWidth: number; originalHeight: number }> {
   const page = await pdfDoc.getPage(pageNumber);
   const viewport = page.getViewport({ scale });
@@ -454,7 +502,7 @@ export async function renderPdfPageToCanvas(
  */
 export async function renderImageItemToCanvas(
   item: ImageItem,
-  maxDimension: number = 1600
+  maxDimension: number = 1800
 ): Promise<HTMLCanvasElement> {
   const img = new Image();
   await new Promise((resolve, reject) => {
@@ -508,18 +556,18 @@ export function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Pr
         else reject(new Error('Canvas toBlob conversion failed'));
       },
       'image/jpeg',
-      Math.max(0.2, Math.min(0.95, quality / 100))
+      Math.max(0.3, Math.min(0.96, quality / 100))
     );
   });
 }
 
 /**
- * Render helper for an individual DNI side (Front or Back) onto an isolated sub-canvas
+ * Render helper for an individual DNI side
  */
 async function loadAndPrepareCardCanvas(
   imgUrl: string,
   rotation: number,
-  maxSide: number = 1200
+  maxSide: number = 1600
 ): Promise<HTMLCanvasElement> {
   const img = new Image();
   await new Promise((resolve, reject) => {
@@ -561,15 +609,15 @@ async function loadAndPrepareCardCanvas(
 }
 
 /**
- * Render both DNI sides (Front top, Back bottom) onto a standard A4 sheet canvas
+ * Render both DNI sides onto a standard A4 sheet canvas with high sharpness
  */
 export async function renderDniToA4Canvas(
   options: DniOptions,
-  scaleFactor: number = 1.0 // 1.0 = ~1240x1754 px
+  scaleFactor: number = 1.0
 ): Promise<HTMLCanvasElement> {
-  // Standard A4 at 150 DPI: 1240 x 1754 px
-  const a4Width = Math.round(1240 * scaleFactor);
-  const a4Height = Math.round(1754 * scaleFactor);
+  // A4 at 160 DPI: 1320 x 1868 px for crystal clear text
+  const a4Width = Math.round(1320 * scaleFactor);
+  const a4Height = Math.round(1868 * scaleFactor);
 
   const a4Canvas = document.createElement('canvas');
   a4Canvas.width = a4Width;
@@ -577,25 +625,22 @@ export async function renderDniToA4Canvas(
   const ctx = a4Canvas.getContext('2d');
   if (!ctx) throw new Error('Could not create A4 canvas');
 
-  // Fill clean white A4 background
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, a4Width, a4Height);
 
-  // Load front and back card canvases if available
   let frontCanvas: HTMLCanvasElement | null = null;
   let backCanvas: HTMLCanvasElement | null = null;
 
   if (options.frontPreviewUrl) {
-    frontCanvas = await loadAndPrepareCardCanvas(options.frontPreviewUrl, options.frontRotation, 1400);
+    frontCanvas = await loadAndPrepareCardCanvas(options.frontPreviewUrl, options.frontRotation, 1600);
   }
   if (options.backPreviewUrl) {
-    backCanvas = await loadAndPrepareCardCanvas(options.backPreviewUrl, options.backRotation, 1400);
+    backCanvas = await loadAndPrepareCardCanvas(options.backPreviewUrl, options.backRotation, 1600);
   }
 
   const targetWidth = Math.round(a4Width * (options.cardScale || 0.78));
   const vGap = Math.round((options.verticalGap || 45) * scaleFactor);
 
-  // Function to draw one card centered with realistic subtle paper/card border
   const drawCard = (cardCanvas: HTMLCanvasElement, yPos: number): number => {
     const cardAspect = cardCanvas.width / cardCanvas.height;
     const drawW = targetWidth;
@@ -603,21 +648,17 @@ export async function renderDniToA4Canvas(
     const xPos = Math.round((a4Width - drawW) / 2);
 
     ctx.save();
-    // Subtle shadow around the card
     ctx.shadowColor = 'rgba(0, 0, 0, 0.12)';
     ctx.shadowBlur = Math.round(6 * scaleFactor);
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = Math.round(2 * scaleFactor);
 
-    // Card white base
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(xPos, yPos, drawW, drawH);
     ctx.shadowColor = 'transparent';
 
-    // Draw card photo
     ctx.drawImage(cardCanvas, xPos, yPos, drawW, drawH);
 
-    // Subtle 1px card boundary
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)';
     ctx.lineWidth = Math.max(1, Math.round(1 * scaleFactor));
     ctx.strokeRect(xPos, yPos, drawW, drawH);
@@ -626,7 +667,6 @@ export async function renderDniToA4Canvas(
     return drawH;
   };
 
-  // If both are present: Front on top, Back on bottom, vertically centered
   if (frontCanvas && backCanvas) {
     const frontAspect = frontCanvas.width / frontCanvas.height;
     const backAspect = backCanvas.width / backCanvas.height;
@@ -639,13 +679,11 @@ export async function renderDniToA4Canvas(
     drawCard(frontCanvas, startY);
     drawCard(backCanvas, startY + frontH + vGap);
   } else if (frontCanvas) {
-    // Only front uploaded so far
     const frontAspect = frontCanvas.width / frontCanvas.height;
     const frontH = Math.round(targetWidth / frontAspect);
     const startY = Math.round((a4Height / 2 - frontH) / 1.5);
     drawCard(frontCanvas, startY);
 
-    // Placeholder box for back
     const phH = frontH;
     const phY = startY + frontH + vGap;
     const xPos = Math.round((a4Width - targetWidth) / 2);
@@ -661,7 +699,6 @@ export async function renderDniToA4Canvas(
     ctx.fillText('Reverso del DNI (Parte posterior)', a4Width / 2, phY + phH / 2);
     ctx.restore();
   } else if (backCanvas) {
-    // Only back uploaded so far
     const backAspect = backCanvas.width / backCanvas.height;
     const backH = Math.round(targetWidth / backAspect);
     const startY = Math.round(a4Height / 2);
@@ -682,7 +719,6 @@ export async function renderDniToA4Canvas(
     ctx.fillText('Anverso del DNI (Parte delantera)', a4Width / 2, phY + phH / 2);
     ctx.restore();
   } else {
-    // Both empty: draw placeholders
     const h = Math.round(targetWidth / 1.586);
     const totalH = h * 2 + vGap;
     const startY = Math.round((a4Height - totalH) / 2);
@@ -704,7 +740,7 @@ export async function renderDniToA4Canvas(
     ctx.restore();
   }
 
-  // Color mode transformations (B&W photocopy or grayscale)
+  // Color mode transformations
   if (options.colorMode === 'bw' || options.colorMode === 'grayscale' || options.applyScannerEffect) {
     const imgData = ctx.getImageData(0, 0, a4Width, a4Height);
     const d = imgData.data;
@@ -716,7 +752,6 @@ export async function renderDniToA4Canvas(
 
       if (options.colorMode === 'bw') {
         let gray = 0.299 * r + 0.587 * g + 0.114 * b;
-        // High-contrast photocopy
         gray = 1.35 * (gray - 128) + 128;
         if (gray > 220) gray = 255;
         else if (gray < 40) gray = 0;
@@ -727,7 +762,7 @@ export async function renderDniToA4Canvas(
       }
 
       if (options.applyScannerEffect && (i % 8 === 0)) {
-        const grain = (Math.random() - 0.5) * 6;
+        const grain = (Math.random() - 0.5) * 5;
         r += grain;
         g += grain;
         b += grain;
@@ -740,11 +775,16 @@ export async function renderDniToA4Canvas(
     ctx.putImageData(imgData, 0, 0);
   }
 
+  // Apply sharpness to DNI text & barcode
+  if (options.sharpness && options.sharpness > 1.0) {
+    applySharpnessFilter(ctx, a4Width, a4Height, options.sharpness);
+  }
+
   return a4Canvas;
 }
 
 /**
- * Process DNI front & back into a single lightweight A4 PDF
+ * Process DNI front & back into a single lightweight, crystal-sharp A4 PDF
  */
 export async function processDniToPdf(
   options: DniOptions,
@@ -754,18 +794,17 @@ export async function processDniToPdf(
     throw new Error('Debes subir al menos una cara del DNI');
   }
 
-  onProgress?.('Renderizando DNI en hoja A4 estándar...');
+  onProgress?.('Renderizando DNI en hoja A4 estándar en alta nitidez...');
   const canvas = await renderDniToA4Canvas(options, 1.0);
 
   onProgress?.('Comprimiendo y optimizando peso del documento...');
-  const jpegBlob = await canvasToJpegBlob(canvas, options.quality || 68);
+  const jpegBlob = await canvasToJpegBlob(canvas, options.quality || 74);
   const jpegBytes = await jpegBlob.arrayBuffer();
 
   onProgress?.('Generando archivo PDF...');
   const outPdf = await PDFDocument.create();
   const embeddedImg = await outPdf.embedJpg(jpegBytes);
 
-  // Standard A4 portrait in points: 595.28 x 841.89
   const page = outPdf.addPage([595, 842]);
   page.drawImage(embeddedImg, {
     x: 0,
@@ -808,14 +847,18 @@ export async function processImagesToPdf(
     const pageNum = i + 1;
 
     onProgress?.(pageNum, totalPages, `Preparando foto/imagen ${pageNum} de ${totalPages}...`);
-    const canvas = await renderImageItemToCanvas(item, 1600);
+    const canvas = await renderImageItemToCanvas(item, 1800);
 
     let processedCanvas: HTMLCanvasElement;
     if (options.applyEffectsToImages) {
-      onProgress?.(pageNum, totalPages, `Aplicando efectos y bordes a foto ${pageNum}...`);
+      onProgress?.(pageNum, totalPages, `Aplicando efectos y nitidez a foto ${pageNum}...`);
       processedCanvas = applyScannerEffects(canvas, options);
     } else {
       processedCanvas = canvas;
+      if (options.sharpness > 1.0) {
+        const c = processedCanvas.getContext('2d');
+        if (c) applySharpnessFilter(c, processedCanvas.width, processedCanvas.height, options.sharpness);
+      }
     }
 
     onProgress?.(pageNum, totalPages, `Comprimiendo imagen ${pageNum}...`);
@@ -874,7 +917,7 @@ export async function processImagesToPdf(
 }
 
 /**
- * Process a PDF file to scanned PDF with optimized size
+ * Process a PDF file to scanned PDF with razor sharpness and optimized size
  */
 export async function processFileToScannedPdf(
   file: File,
@@ -891,14 +934,14 @@ export async function processFileToScannedPdf(
     pageCount = pdfDoc.numPages;
 
     for (let i = 1; i <= pageCount; i++) {
-      onProgress?.(i, pageCount, `Renderizando página ${i} de ${pageCount}...`);
+      onProgress?.(i, pageCount, `Renderizando página ${i} de ${pageCount} en alta nitidez...`);
       const { canvas, originalWidth, originalHeight } = await renderPdfPageToCanvas(
         pdfDoc,
         i,
         options.resolutionScale
       );
 
-      onProgress?.(i, pageCount, `Aplicando efectos y bordes de escaneo (página ${i})...`);
+      onProgress?.(i, pageCount, `Aplicando efectos, nitidez y bordes (página ${i})...`);
       const scannedCanvas = applyScannerEffects(canvas, options);
 
       onProgress?.(i, pageCount, `Comprimiendo imagen optimizada (página ${i})...`);
@@ -940,7 +983,7 @@ export async function processFileToScannedPdf(
     return res;
   }
 
-  onProgress?.(pageCount, pageCount, 'Compilando documento PDF final ultra optimizado...');
+  onProgress?.(pageCount, pageCount, 'Compilando documento PDF final...');
   const finalPdfBytes = await outPdf.save();
   const finalBlob = new Blob([finalPdfBytes], { type: 'application/pdf' });
 
